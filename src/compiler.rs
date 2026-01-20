@@ -54,7 +54,7 @@ fn assemble(args: CompileArgs, asm_files: Vec<OsString>) -> Result<(), BuildErro
 
     if !output.status.success() {
         return Err(BuildError::AssemblerError(
-            String::from_utf8(output.stderr).unwrap_or_else(|_| "Assembler failed".to_string()),
+            String::from_utf8(output.stderr).expect("gcc fail message invalid utf8"),
         ));
     }
 

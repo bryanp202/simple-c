@@ -1,12 +1,11 @@
 use std::{
-    cmp::Ordering,
     collections::HashMap,
     fmt::Display,
     ops::Range,
     path::{Path, PathBuf},
 };
 
-use crate::compiler::token::Token;
+pub type SyntaxErrorWithCtx = ErrorWithCtx<SyntaxError>;
 
 pub enum BuildError {
     AssemblerError(String),
@@ -16,7 +15,7 @@ pub enum BuildError {
 impl Display for BuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AssemblerError(err) => write!(f, "{err}"),
+            Self::AssemblerError(err) => write_err_header(f, err),
             Self::CompileErrors(errors) => {
                 for err in errors {
                     write!(f, "{err}")?;
@@ -35,8 +34,7 @@ pub enum CompileError {
     },
     SyntaxErrors {
         src_path: PathBuf,
-        lines_buf: LineBuf,
-        errors: Vec<CachedError<SyntaxError>>,
+        err_cache: ErrorCache<SyntaxError>,
     },
     // SemanticErrors {
     //     src_path: PathBuf,
@@ -54,9 +52,8 @@ impl Display for CompileError {
             }
             Self::SyntaxErrors {
                 src_path,
-                lines_buf,
-                errors,
-            } => display_error_messages(f, src_path, lines_buf, errors.iter()),
+                err_cache,
+            } => err_cache.display(f, src_path),
         }
     }
 }
@@ -65,44 +62,29 @@ impl CompileError {
     pub fn from_syntax_errors(
         src: &str,
         src_path: PathBuf,
-        errors: Vec<SyntaxErrorWithCtx>,
+        errors: Vec<ErrorWithCtx<SyntaxError>>,
     ) -> Self {
-        let mut line_buf_builder = LineBufBuilder::new(src);
-
-        let errors = errors
-            .into_iter()
-            .map(|SyntaxErrorWithCtx { ctx, err }| {
-                let (line_ids, col, len) = line_buf_builder.cache(src, ctx.range);
-                CachedError::<SyntaxError> {
-                    line_ids,
-                    col,
-                    len,
-                    err,
-                }
-            })
-            .collect();
-        let lines_buf = line_buf_builder.build();
+        let err_cache = ErrorCache::from_errors_with_ctx(src, errors);
 
         Self::SyntaxErrors {
             src_path,
-            lines_buf,
-            errors,
+            err_cache,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct CachedError<T> {
+pub struct CachedError<E: Display> {
     line_ids: Range<usize>,
-    col: usize,
-    len: usize,
-    err: T,
+    start_col: usize,
+    end_col: usize,
+    err: E,
 }
 
 #[derive(Debug)]
-pub struct SyntaxErrorWithCtx {
-    pub(crate) ctx: Token,
-    pub(crate) err: SyntaxError,
+pub struct ErrorWithCtx<E: Display> {
+    pub(crate) ctx: Range<usize>,
+    pub(crate) err: E,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -120,100 +102,76 @@ impl Display for SyntaxError {
 }
 
 #[derive(Debug)]
-struct LineBufBuilder {
-    line_starts: Vec<usize>,
-    line_ends: Vec<usize>,
+pub struct ErrorCache<E: Display> {
     ranges: HashMap<usize, Range<usize>>,
     cache: String,
+    errors: Vec<CachedError<E>>,
 }
 
-impl LineBufBuilder {
-    fn new(src: &str) -> Self {
-        let mut line_starts = Vec::new();
-        let mut line_ends = Vec::new();
+impl<E: Display> ErrorCache<E> {
+    fn from_errors_with_ctx(src: &str, errors: Vec<ErrorWithCtx<E>>) -> Self {
+        let line_ranges = src
+            .lines()
+            .map(|line| {
+                let start = line.as_ptr() as usize - src.as_ptr() as usize;
+                start..start + line.len()
+            })
+            .collect::<Vec<_>>();
+        let mut ranges = HashMap::new();
+        let mut cache = String::new();
 
-        for line in src.lines() {
-            let start = line.as_ptr() as usize - src.as_ptr() as usize;
-            let end = start + line.len();
-            line_starts.push(start);
-            line_ends.push(end);
-        }
+        let errors = errors
+            .into_iter()
+            .map(|err| Self::cache_err(src, &line_ranges, &mut ranges, &mut cache, err))
+            .collect();
 
         Self {
-            line_starts,
-            line_ends,
-            ranges: HashMap::new(),
-            cache: String::new(),
+            ranges,
+            cache,
+            errors,
         }
     }
 
-    fn build(self) -> LineBuf {
-        LineBuf {
-            ranges: self.ranges,
-            cache: self.cache,
-        }
-    }
-
-    /// Caches any new lines to the buf
-    ///
-    /// Returns: The range of lines that input `range` is in
-    /// and the col of the start of the range
-    /// and the len of the range in chars
-    fn cache(&mut self, src: &str, range: Range<usize>) -> (Range<usize>, usize, usize) {
-        let start_line = self
-            .line_starts
-            .binary_search_by(|&probe| {
-                if range.start < probe {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            })
-            .unwrap_or_else(|a| a) - 1;
-        let end_line = self
-            .line_ends
-            .binary_search_by(|&probe| {
-                if range.end < probe {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            })
-            .unwrap_or_else(|a| a) + 1;
+    fn cache_err(
+        src: &str,
+        line_ranges: &Vec<Range<usize>>,
+        ranges: &mut HashMap<usize, Range<usize>>,
+        cache: &mut String,
+        err: ErrorWithCtx<E>,
+    ) -> CachedError<E> {
+        let start_line = line_ranges.partition_point(|range| range.end < err.ctx.start);
+        let end_line = line_ranges.partition_point(|range| range.start < err.ctx.end);
         let line_ids = start_line..end_line;
 
         for line_num in line_ids.clone() {
-            self.ranges.entry(line_num).or_insert_with(|| {
-                let line = &src[self.line_starts[line_num]..self.line_ends[line_num]];
-                let buf_start = self.cache.len();
-                self.cache.push_str(line);
-                buf_start..self.cache.len()
+            ranges.entry(line_num).or_insert_with(|| {
+                let line = &src[line_ranges[line_num].clone()];
+                let buf_start = cache.len();
+                cache.push_str(line);
+                buf_start..cache.len()
             });
         }
 
-        let from_line = &src[self.line_starts[line_ids.start]..];
-        let (col, _) = from_line
-            .char_indices()
-            .enumerate()
-            .find(|(i, _)| {
-                range.start
-                    == (i + (from_line.as_ptr() as usize - src.as_ptr() as usize))
-            })
-            .expect("Token out of bounds");
+        // Ensures no panic if an empty src is inputted
+        let (start_line_start, end_line_start) = if line_ranges.is_empty() {
+            (0, 0)
+        } else {
+            (
+                line_ranges[start_line].start,
+                line_ranges[end_line.saturating_sub(1)].start,
+            )
+        };
+        let start_col = src[start_line_start..err.ctx.start].chars().count();
+        let end_col = src[end_line_start..err.ctx.end].chars().count();
 
-        let len = src[range].chars().count() - line_ids.len();
-
-        (line_ids, col + 1, len)
+        CachedError::<E> {
+            line_ids,
+            start_col,
+            end_col,
+            err: err.err,
+        }
     }
-}
 
-#[derive(Debug)]
-pub struct LineBuf {
-    ranges: HashMap<usize, Range<usize>>,
-    cache: String,
-}
-
-impl LineBuf {
     fn lookup(&self, line_num: usize) -> &str {
         let range = self
             .ranges
@@ -221,27 +179,93 @@ impl LineBuf {
             .expect("Looked up out of bounds line");
         &self.cache[range.clone()]
     }
+
+    fn display(&self, f: &mut std::fmt::Formatter<'_>, src_path: &Path) -> std::fmt::Result {
+        for CachedError {
+            line_ids,
+            start_col,
+            end_col,
+            err,
+        } in &self.errors
+        {
+            write_err_header(f, err)?;
+            writeln!(
+                f,
+                " --> {}:{}:{}",
+                src_path.display(),
+                line_ids.start + 1,
+                start_col + 1,
+            )?;
+
+            if line_ids.is_empty() {
+                continue;
+            }
+            let line_num_width = (line_ids.end - 1).checked_ilog10().unwrap_or(0) as usize + 1;
+            // Write the first line squiggles with ^ at start
+            let line = self.lookup(line_ids.start);
+            writeln!(f, " {:>line_num_width$} | {line}", line_ids.start + 1)?;
+            // Do with stuff to draw squiqles under
+            let len = if line_ids.start + 1 == line_ids.end {
+                *end_col - start_col - 1
+            } else {
+                line.chars().count() - start_col - 1
+            };
+            writeln!(
+                f,
+                " {:>line_num_width$} | {:>start_col$}^{:~>len$}",
+                "", "", ""
+            )?;
+
+            // Write any remaining lines without ^ at the start
+            for line_id in line_ids.clone().skip(1) {
+                let line = self.lookup(line_id);
+                writeln!(f, " {:>line_num_width$} | {line}", line_id + 1)?;
+                // Do with stuff to draw squiqles under
+                let len = if line_id + 1 == line_ids.end {
+                    *end_col
+                } else {
+                    line.chars().count()
+                };
+                writeln!(f, " {:>line_num_width$} | {:~>len$}", "", "")?;
+            }
+        }
+        Ok(())
+    }
 }
 
-fn display_error_messages<'err, E: 'err + Display>(
-    f: &mut std::fmt::Formatter<'_>,
-    src_path: &Path,
-    lines_buf: &LineBuf,
-    errors: impl Iterator<Item = &'err CachedError<E>>,
-) -> std::fmt::Result {
-    for CachedError { line_ids, col, len, err } in errors {
-        writeln!(f, "error: {}", err)?;
-        writeln!(f, " --> {}:{}:{col}", src_path.display(), line_ids.start + 1)?;
+/// Prints the header for the error output
+///
+/// error(bold and red): [err]
+fn write_err_header<E: Display>(f: &mut std::fmt::Formatter<'_>, err: E) -> std::fmt::Result {
+    writeln!(f, "\x1b[1m\x1b[31merror\x1b[0m: \x1b[1m{}\x1b[0m", err)
+}
 
-        let line_num_width = (((line_ids.end + 1) as f64).log10().ceil() as usize).max(1);
+#[test]
+fn multiline_err_cache_test() {
+    let src = "int main()\n\
+        printf(\n\
+        \"Hello, %s!\",\n\
+        name\n\
+        );";
+    let errors = vec![ErrorWithCtx::<SyntaxError> {
+        ctx: 0..src.len(),
+        err: SyntaxError::AdjacentDigitSeperators,
+    }];
+    let error_msg = CompileError::from_syntax_errors(src, "test.c".into(), errors).to_string();
 
-        for line_id in line_ids.clone() {
-            let line = lines_buf.lookup(line_id);
-            eprintln!(" {:^width$} | {line}", line_id + 1, width = line_num_width);
-            // Do with stuff to draw squiqles under
-        }
-    }
-    Ok(())
+    let mut src_lines = error_msg.lines();
+    _ = src_lines.next();
+    assert_eq!(Some(" --> test.c:1:1"), src_lines.next());
+    assert_eq!(Some(" 1 | int main()"), src_lines.next());
+    assert_eq!(Some("   | ^~~~~~~~~~"), src_lines.next());
+    assert_eq!(Some(" 2 | printf("), src_lines.next());
+    assert_eq!(Some("   | ~~~~~~~"), src_lines.next());
+    assert_eq!(Some(" 3 | \"Hello, %s!\","), src_lines.next());
+    assert_eq!(Some("   | ~~~~~~~~~~~~~"), src_lines.next());
+    assert_eq!(Some(" 4 | name"), src_lines.next());
+    assert_eq!(Some("   | ~~~~"), src_lines.next());
+    assert_eq!(Some(" 5 | );"), src_lines.next());
+    assert_eq!(Some("   | ~~"), src_lines.next());
 }
 // eprint!("error: ");
 // match err {

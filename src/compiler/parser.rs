@@ -35,7 +35,11 @@ impl<'src> Parser<'src> {
     pub fn parse(mut self, src_path: PathBuf) -> Result<Program, CompileError> {
         self.advance();
         let Some(item) = self.item() else {
-            return Err(CompileError::from_syntax_errors(self.src, src_path, self.errors));
+            return Err(CompileError::from_syntax_errors(
+                self.src,
+                src_path,
+                self.errors,
+            ));
         };
         let program = Program { item };
         Ok(program)
@@ -74,7 +78,10 @@ impl<'src> Parser<'src> {
             self.advance();
             Ok(())
         } else {
-            Err(SyntaxErrorWithCtx { ctx: self.curr.clone(), err })
+            Err(SyntaxErrorWithCtx {
+                ctx: self.curr.range.clone(),
+                err,
+            })
         }
     }
 
@@ -84,7 +91,7 @@ impl<'src> Parser<'src> {
             Err(err) => {
                 self.log_err(err);
                 None
-            },
+            }
         }
     }
 
