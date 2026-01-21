@@ -50,8 +50,8 @@ impl CompileArgs {
 fn main() -> ExitCode {
     let args = CompileArgs::parse();
     match compile(args) {
-        Err(errors) => {
-            eprint!("{errors}");
+        Err(build_err) => {
+            eprint!("{build_err}");
             ExitCode::FAILURE
         }
         Ok(_) => ExitCode::SUCCESS,

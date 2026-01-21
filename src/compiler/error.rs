@@ -246,7 +246,7 @@ impl<E: Display> ErrorCache<E> {
                 // Do with stuff to draw squiggles under
                 writeln!(
                     f,
-                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {:>start_col$}\x1b[1m\x1b[31m{:~>line_char_count$}\x1b[39m",
+                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {:>start_col$}\x1b[1m\x1b[31m{:~>line_char_count$}\x1b[0m",
                     "", "", ""
                 )?;
                 start_col = 0;
@@ -296,7 +296,7 @@ fn multiline_err_cache_test() {
     );
     assert_eq!(Some("\x1b[1m\x1b[36m2 |\x1b[0m printf("), src_lines.next());
     assert_eq!(
-        Some("\x1b[1m\x1b[36m  |\x1b[0m \x1b[1m\x1b[31m~~~~~~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m  |\x1b[0m \x1b[1m\x1b[31m~~~~~~\x1b[0m"),
         src_lines.next()
     );
     _ = src_lines.next();
@@ -308,7 +308,7 @@ fn multiline_err_cache_test() {
     );
     assert_eq!(Some("\x1b[1m\x1b[36m 2 |\x1b[0m printf("), src_lines.next());
     assert_eq!(
-        Some("\x1b[1m\x1b[36m   |\x1b[0m       \x1b[1m\x1b[31m~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m   |\x1b[0m       \x1b[1m\x1b[31m~\x1b[0m"),
         src_lines.next()
     );
     assert_eq!(
@@ -316,28 +316,28 @@ fn multiline_err_cache_test() {
         src_lines.next()
     );
     assert_eq!(
-        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~~~~~~~~~~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~~~~~~~~~~\x1b[0m"),
         src_lines.next()
     );
     assert_eq!(Some("\x1b[1m\x1b[36m 4 |\x1b[0m name"), src_lines.next());
     assert_eq!(
-        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~\x1b[0m"),
         src_lines.next()
     );
     assert_eq!(Some("\x1b[1m\x1b[36m 5 |\x1b[0m );"), src_lines.next());
     assert_eq!(
-        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~\x1b[0m"),
         src_lines.next()
     );
     assert_eq!(Some("\x1b[1m\x1b[36m 6 |\x1b[0m wowow"), src_lines.next());
     assert_eq!(
-        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~~\x1b[0m"),
         src_lines.next()
     );
     assert_eq!(Some("\x1b[1m\x1b[36m...\x1b[0m"), src_lines.next());
     assert_eq!(Some("\x1b[1m\x1b[36m10 |\x1b[0m cool;"), src_lines.next());
     assert_eq!(
-        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~~\x1b[39m"),
+        Some("\x1b[1m\x1b[36m   |\x1b[0m \x1b[1m\x1b[31m~~~~~\x1b[0m"),
         src_lines.next()
     );
 }
