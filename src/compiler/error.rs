@@ -1,9 +1,11 @@
 use std::{
-    collections::HashMap,
+    cmp::Ordering,
+    collections::BTreeMap,
     fmt::Display,
     ops::Range,
     path::{Path, PathBuf},
 };
+use unicode_width::UnicodeWidthStr;
 
 pub type SyntaxErrorWithCtx = ErrorWithCtx<SyntaxError>;
 
@@ -103,13 +105,13 @@ impl Display for SyntaxError {
 
 #[derive(Debug)]
 pub struct ErrorCache<E: Display> {
-    ranges: HashMap<usize, Range<usize>>,
+    lines: Vec<(usize, usize, Range<usize>)>, // (line num, len in chars, range of line)
     cache: String,
     errors: Vec<CachedError<E>>,
 }
 
 impl<E: Display> ErrorCache<E> {
-    fn from_errors_with_ctx(src: &str, errors: Vec<ErrorWithCtx<E>>) -> Self {
+    fn from_errors_with_ctx(src: &str, mut errors: Vec<ErrorWithCtx<E>>) -> Self {
         let line_ranges = src
             .lines()
             .map(|line| {
@@ -117,16 +119,23 @@ impl<E: Display> ErrorCache<E> {
                 start..start + line.len()
             })
             .collect::<Vec<_>>();
-        let mut ranges = HashMap::new();
+        let mut unique_lines = BTreeMap::new();
         let mut cache = String::new();
 
+        errors.sort_by(|a, b| match a.ctx.start.cmp(&b.ctx.start) {
+            Ordering::Equal => a.ctx.end.cmp(&b.ctx.end),
+            ord => ord,
+        });
         let errors = errors
             .into_iter()
-            .map(|err| Self::cache_err(src, &line_ranges, &mut ranges, &mut cache, err))
+            .map(|err| Self::cache_err(src, &line_ranges, &mut unique_lines, &mut cache, err))
             .collect();
-
+        let lines = unique_lines
+            .into_values()
+            .map(|(_, a, b, c)| (a, b, c))
+            .collect();
         Self {
-            ranges,
+            lines,
             cache,
             errors,
         }
@@ -134,35 +143,36 @@ impl<E: Display> ErrorCache<E> {
 
     fn cache_err(
         src: &str,
-        line_ranges: &Vec<Range<usize>>,
-        ranges: &mut HashMap<usize, Range<usize>>,
+        line_ranges: &[Range<usize>],
+        unique_lines: &mut BTreeMap<usize, (usize, usize, usize, Range<usize>)>,
         cache: &mut String,
         err: ErrorWithCtx<E>,
     ) -> CachedError<E> {
         let start_line = line_ranges.partition_point(|range| range.end < err.ctx.start);
         let end_line = line_ranges.partition_point(|range| range.start < err.ctx.end);
-        let line_ids = start_line..end_line;
 
-        for line_num in line_ids.clone() {
-            ranges.entry(line_num).or_insert_with(|| {
+        for line_num in start_line..end_line {
+            let count = unique_lines.len();
+            unique_lines.entry(line_num).or_insert_with(|| {
                 let line = &src[line_ranges[line_num].clone()];
                 let buf_start = cache.len();
                 cache.push_str(line);
-                buf_start..cache.len()
+                let line_range = buf_start..cache.len();
+                let line_width = line.width();
+                let line_id = count;
+                (line_id, line_num + 1, line_width, line_range)
             });
         }
+        let first_line_id = unique_lines.get(&start_line).map_or(0, |&(id, _, _, _)| id);
+        let line_count = end_line - start_line;
+        let line_ids = first_line_id..first_line_id + line_count;
 
         // Ensures no panic if an empty src is inputted
-        let (start_line_start, end_line_start) = if line_ranges.is_empty() {
-            (0, 0)
-        } else {
-            (
-                line_ranges[start_line].start,
-                line_ranges[end_line.saturating_sub(1)].start,
-            )
-        };
-        let start_col = src[start_line_start..err.ctx.start].chars().count();
-        let end_col = src[end_line_start..err.ctx.end].chars().count();
+        let sub_line_ranges = &line_ranges[start_line..end_line];
+        let start_col =
+            src[sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.start].width();
+        let end_col =
+            src[sub_line_ranges.last().map_or(0, |range| range.start)..err.ctx.end].width();
 
         CachedError::<E> {
             line_ids,
@@ -172,12 +182,21 @@ impl<E: Display> ErrorCache<E> {
         }
     }
 
-    fn lookup(&self, line_num: usize) -> &str {
-        let range = self
-            .ranges
-            .get(&line_num)
-            .expect("Looked up out of bounds line");
-        &self.cache[range.clone()]
+    /// Returns the line_num, its width, and the line substr
+    fn lookup(&self, line_id: usize) -> (usize, usize, &str) {
+        let (line_num, width, line_range) = self.lines[line_id].clone();
+        let line = &self.cache[line_range];
+        (line_num, width, line)
+    }
+
+    /// Returns the first line num and the max width in chars of the line_nums from line_id range
+    fn get_start_info(&self, line_ids: &Range<usize>) -> (usize, usize) {
+        let (line_num, _, _) = self.lookup(line_ids.start);
+        let line_num_width = (line_num + line_ids.len() - 1)
+            .checked_ilog10()
+            .unwrap_or(0) as usize
+            + 1;
+        (line_num_width, line_num)
     }
 
     fn display(&self, f: &mut std::fmt::Formatter<'_>, src_path: &Path) -> std::fmt::Result {
@@ -189,45 +208,50 @@ impl<E: Display> ErrorCache<E> {
         } in &self.errors
         {
             write_err_header(f, err)?;
+            let (line_num_width, start_line) = self.get_start_info(line_ids);
             writeln!(
                 f,
-                " --> {}:{}:{}",
+                "  \x1b[1m\x1b[36m-->\x1b[0m {}:{start_line}:{}",
                 src_path.display(),
-                line_ids.start + 1,
                 start_col + 1,
             )?;
-
+            // For errors from empty src files
             if line_ids.is_empty() {
                 continue;
             }
-            let line_num_width = (line_ids.end - 1).checked_ilog10().unwrap_or(0) as usize + 1;
-            // Write the first line squiggles with ^ at start
-            let line = self.lookup(line_ids.start);
-            writeln!(f, " {:>line_num_width$} | {line}", line_ids.start + 1)?;
-            // Do with stuff to draw squiqles under
-            let len = if line_ids.start + 1 == line_ids.end {
-                *end_col - start_col - 1
-            } else {
-                line.chars().count() - start_col - 1
-            };
-            writeln!(
-                f,
-                " {:>line_num_width$} | {:>start_col$}^{:~>len$}",
-                "", "", ""
-            )?;
 
             // Write any remaining lines without ^ at the start
-            for line_id in line_ids.clone().skip(1) {
-                let line = self.lookup(line_id);
-                writeln!(f, " {:>line_num_width$} | {line}", line_id + 1)?;
-                // Do with stuff to draw squiqles under
-                let len = if line_id + 1 == line_ids.end {
-                    *end_col
-                } else {
-                    line.chars().count()
+            let mut start_col = *start_col;
+            let mut skipped = false;
+            for line_id in line_ids.clone() {
+                let (line_num, line_width, line) = self.lookup(line_id);
+                if line.is_empty() {
+                    if !skipped {
+                        writeln!(f, "\x1b[1m\x1b[36m...\x1b[0m")?;
+                        skipped = true;
+                    }
+                    continue;
+                }
+                skipped = false;
+
+                let line_char_count = match line_id + 1 == line_ids.end {
+                    true => *end_col - start_col,
+                    false => line_width - start_col,
                 };
-                writeln!(f, " {:>line_num_width$} | {:~>len$}", "", "")?;
+                writeln!(
+                    f,
+                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {line}",
+                    line_num
+                )?;
+                // Do with stuff to draw squiggles under
+                writeln!(
+                    f,
+                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {:>start_col$}{:~>line_char_count$}",
+                    "", "", ""
+                )?;
+                start_col = 0;
             }
+            writeln!(f)?;
         }
         Ok(())
     }
@@ -237,7 +261,7 @@ impl<E: Display> ErrorCache<E> {
 ///
 /// error(bold and red): [err]
 fn write_err_header<E: Display>(f: &mut std::fmt::Formatter<'_>, err: E) -> std::fmt::Result {
-    writeln!(f, "\x1b[1m\x1b[31merror\x1b[0m: \x1b[1m{}\x1b[0m", err)
+    writeln!(f, "\x1b[1m\x1b[31merror\x1b[39m: {}\x1b[0m", err)
 }
 
 #[test]
@@ -246,58 +270,56 @@ fn multiline_err_cache_test() {
         printf(\n\
         \"Hello, %s!\",\n\
         name\n\
-        );";
-    let errors = vec![ErrorWithCtx::<SyntaxError> {
-        ctx: 0..src.len(),
-        err: SyntaxError::AdjacentDigitSeperators,
-    }];
+        );\n\
+        wowow\n\
+        \n\
+        \n\
+        \n\
+        cool;";
+    let errors = vec![
+        ErrorWithCtx::<SyntaxError> {
+            ctx: 17..src.len(),
+            err: SyntaxError::AdjacentDigitSeperators,
+        },
+        ErrorWithCtx::<SyntaxError> {
+            ctx: 11..17,
+            err: SyntaxError::AdjacentDigitSeperators,
+        },
+    ];
     let error_msg = CompileError::from_syntax_errors(src, "test.c".into(), errors).to_string();
 
     let mut src_lines = error_msg.lines();
     _ = src_lines.next();
-    assert_eq!(Some(" --> test.c:1:1"), src_lines.next());
-    assert_eq!(Some(" 1 | int main()"), src_lines.next());
-    assert_eq!(Some("   | ^~~~~~~~~~"), src_lines.next());
-    assert_eq!(Some(" 2 | printf("), src_lines.next());
-    assert_eq!(Some("   | ~~~~~~~"), src_lines.next());
-    assert_eq!(Some(" 3 | \"Hello, %s!\","), src_lines.next());
-    assert_eq!(Some("   | ~~~~~~~~~~~~~"), src_lines.next());
-    assert_eq!(Some(" 4 | name"), src_lines.next());
-    assert_eq!(Some("   | ~~~~"), src_lines.next());
-    assert_eq!(Some(" 5 | );"), src_lines.next());
-    assert_eq!(Some("   | ~~"), src_lines.next());
+    assert_eq!(
+        Some("  \x1b[1m\x1b[36m-->\x1b[0m test.c:2:1"),
+        src_lines.next()
+    );
+    assert_eq!(Some("\x1b[1m\x1b[36m2 |\x1b[0m printf("), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m  |\x1b[0m ~~~~~~"), src_lines.next());
+    _ = src_lines.next();
+    _ = src_lines.next();
+
+    assert_eq!(
+        Some("  \x1b[1m\x1b[36m-->\x1b[0m test.c:2:7"),
+        src_lines.next()
+    );
+    assert_eq!(Some("\x1b[1m\x1b[36m 2 |\x1b[0m printf("), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m   |\x1b[0m       ~"), src_lines.next());
+    assert_eq!(
+        Some("\x1b[1m\x1b[36m 3 |\x1b[0m \"Hello, %s!\","),
+        src_lines.next()
+    );
+    assert_eq!(
+        Some("\x1b[1m\x1b[36m   |\x1b[0m ~~~~~~~~~~~~~"),
+        src_lines.next()
+    );
+    assert_eq!(Some("\x1b[1m\x1b[36m 4 |\x1b[0m name"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m   |\x1b[0m ~~~~"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m 5 |\x1b[0m );"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m   |\x1b[0m ~~"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m 6 |\x1b[0m wowow"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m   |\x1b[0m ~~~~~"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m...\x1b[0m"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m10 |\x1b[0m cool;"), src_lines.next());
+    assert_eq!(Some("\x1b[1m\x1b[36m   |\x1b[0m ~~~~~"), src_lines.next());
 }
-// eprint!("error: ");
-// match err {
-//     crate::error::LexerError::UnknownSymbol => eprintln!("unknown symbol"),
-//     _ => {}
-// }
-
-// let line_start = src[..token.range.start]
-//     .rfind('\n')
-//     .map(|i| i + 1)
-//     .unwrap_or(0);
-// let line_end = src[token.range.start..]
-//     .find('\n')
-//     .map(|i| token.range.start + i)
-//     .unwrap_or(src.len());
-
-// let line = &src[line_start..line_end];
-
-// let line_num = src[..line_start].chars().filter(|&c| c == '\n').count() + 1;
-// let column = src[line_start..token.range.start].chars().count() + 1;
-// let line_num_width = ((line_num as f64).log10().ceil() as usize).max(1);
-// let len = src[token.range.clone()].chars().count() - 1;
-
-// eprintln!(" --> {}:{line_num}:{column}", src_path.display());
-// eprintln!(" {:^width$} | {line}", line_num, width = line_num_width);
-// eprintln!(
-//     " {:^width$} | {:>shift$}^{:~>len$}",
-//     "",
-//     "",
-//     "",
-//     width = line_num_width,
-//     shift = column - 1,
-//     len = len
-// );
-// eprintln!();

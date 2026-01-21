@@ -56,11 +56,7 @@ impl<'src> Parser<'src> {
     }
 
     fn at_end(&self) -> bool {
-        if let TokenTy::Eof = self.curr.ty {
-            true
-        } else {
-            false
-        }
+        matches!(self.curr.ty, TokenTy::Eof)
     }
 
     fn advance(&mut self) {

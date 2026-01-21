@@ -51,7 +51,7 @@ fn main() -> ExitCode {
     let args = CompileArgs::parse();
     match compile(args) {
         Err(errors) => {
-            eprintln!("{errors}");
+            eprint!("{errors}");
             ExitCode::FAILURE
         }
         Ok(_) => ExitCode::SUCCESS,
