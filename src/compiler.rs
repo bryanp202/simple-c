@@ -14,6 +14,7 @@ use crate::{
     },
 };
 
+mod asm;
 mod ast;
 mod error;
 mod lexer;
@@ -124,6 +125,8 @@ fn generate_unit(
     std::fs::remove_file(i_path).expect("Preprocessed source was removed early");
 
     let ast_tree = Parser::new(&src).parse(src_path)?;
+    let program_asm = ast_tree.as_asm();
     let asm_path = i_path.with_extension("s");
+    program_asm.generate(&asm_path).expect("Failed to write to file");
     Ok(asm_path)
 }

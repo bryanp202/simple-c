@@ -48,12 +48,15 @@ impl CompileArgs {
 }
 
 fn main() -> ExitCode {
+    let start = std::time::Instant::now();
     let args = CompileArgs::parse();
-    match compile(args) {
+    let exit_code = match compile(args) {
         Err(build_err) => {
             eprint!("{build_err}");
             ExitCode::FAILURE
         }
         Ok(_) => ExitCode::SUCCESS,
-    }
+    };
+    println!("Time to run: {:?}", start.elapsed());
+    exit_code
 }

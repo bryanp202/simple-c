@@ -94,7 +94,8 @@ impl<'src> Parser<'src> {
     fn function(&mut self) -> Result<Item, SyntaxErrorWithCtx> {
         self.eat(TokenTy::Int, SyntaxError::UnknownSymbol)?;
         self.eat(TokenTy::Identifier, SyntaxError::InvalidIntegerSuffix)?;
-        let name = self.prev.clone();
+        let name_token = self.prev.clone();
+        let name = self.src[name_token.range].to_string();
 
         self.eat(TokenTy::OpenParen, SyntaxError::AdjacentDigitSeperators)?;
         self.eat(TokenTy::CloseParen, SyntaxError::AdjacentDigitSeperators)?;
@@ -103,6 +104,7 @@ impl<'src> Parser<'src> {
         let body = self.stmt()?;
 
         self.eat(TokenTy::CloseBrace, SyntaxError::UnknownSymbol)?;
+        
 
         Ok(Item::Fn { name, body })
     }
