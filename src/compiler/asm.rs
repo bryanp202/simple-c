@@ -1,43 +1,71 @@
-use std::{fmt::Display, fs::File, io::{self, BufWriter, Write}, path::Path};
+use std::{
+    fmt::Display,
+    fs::File,
+    io::{self, BufWriter, Write},
+    path::Path,
+};
 
-use crate::compiler::ast::{self, Expr, Stmt};
+use crate::intern::Interned;
 
-pub struct Program {
-    pub(crate) item: Item
+pub struct Program<'src> {
+    pub(crate) item: Item<'src>,
 }
 
-pub enum Item {
-    Fn {name: String, insts: Vec<Inst>},
+pub enum Item<'src> {
+    Fn {
+        name: Interned<'src, str>,
+        insts: Vec<Inst>,
+    },
 }
 
 pub enum Inst {
-    Mov { src: Operand, dest: Operand },
+    AllocateStack(usize),
+    Neg(Operand),
+    Not(Operand),
+    Mov { src: Operand, dst: Operand },
     Ret,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Operand {
     Imm(i32),
-    Register
+    Reg(Reg),
+    Psuedo(usize),
+    Stack(usize),
 }
 
-impl Program {
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum Reg {
+    AX,
+    R10,
+}
+
+impl<'src> Program<'src> {
     pub fn generate(&self, path: &Path) -> io::Result<()> {
         let mut buf = BufWriter::new(File::create(path)?);
-        write!(buf, "{}", self.item)
+        write!(buf, "{}", self)
     }
 }
 
-impl Display for Item {
+impl<'src> Display for Program<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.item)
+    }
+}
+
+impl<'src> Display for Item<'src> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Fn { name, insts } => {
-                writeln!(f, "  .globl {name}")?;
-                writeln!(f, "{name}:")?;
+                writeln!(f, "  .globl {}", name.get())?;
+                writeln!(f, "{}:", name.get())?;
+                writeln!(f, "  pushq %rbp")?;
+                writeln!(f, "  movq %rsp, %rbp")?;
                 for inst in insts {
                     writeln!(f, "  {inst}")?;
                 }
                 Ok(())
-            },
+            }
         }
     }
 }
@@ -45,8 +73,15 @@ impl Display for Item {
 impl Display for Inst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Mov { src, dest } => write!(f, "movl {src}, {dest}"),
-            Self::Ret => write!(f, "ret"),
+            Self::AllocateStack(amt) => write!(f, "subq ${amt}, %rsp"),
+            Self::Mov { src, dst } => write!(f, "movl {src}, {dst}"),
+            Self::Neg(dst) => write!(f, "negl {dst}"),
+            Self::Not(dst) => write!(f, "notl {dst}"),
+            Self::Ret => {
+                writeln!(f, "movq %rbp, %rsp")?;
+                writeln!(f, "  popq %rbp")?;
+                write!(f, "  ret")
+            }
         }
     }
 }
@@ -55,7 +90,25 @@ impl Display for Operand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Imm(imm) => write!(f, "${imm}"),
-            Self::Register => write!(f, "%eax"),
+            Self::Reg(reg) => write!(f, "%{}", reg.as_four_byte()),
+            Self::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Reg {
+    fn as_eight_byte(&self) -> &'static str {
+        match self {
+            Self::AX => "rax",
+            Self::R10 => "r10",
+        }
+    }
+
+    fn as_four_byte(&self) -> &'static str {
+        match self {
+            Self::AX => "eax",
+            Self::R10 => "r10d",
         }
     }
 }

@@ -31,11 +31,17 @@ impl<'src> Lexer<'src> {
         };
 
         match c {
+            // Single
             ';' => self.emit_token(TokenTy::Semicolon),
             '(' => self.emit_token(TokenTy::OpenParen),
             ')' => self.emit_token(TokenTy::CloseParen),
             '{' => self.emit_token(TokenTy::OpenBrace),
             '}' => self.emit_token(TokenTy::CloseBrace),
+            '~' => self.emit_token(TokenTy::Tilde),
+
+            // Single or double
+            '-' if self.eat_if('-') => self.emit_token(TokenTy::MinusMinus),
+            '-' => self.emit_token(TokenTy::Minus),
             c if c.is_ascii_digit() => self.number(),
             c if c.is_alphabetic() => self.identifier(c),
             _ => self.error(SyntaxError::UnknownSymbol),
@@ -53,10 +59,7 @@ impl<'src> Lexer<'src> {
         self.len_remaining = new_len_remaining;
         self.start += len;
 
-        Token {
-            ty,
-            range: start..self.start,
-        }
+        Token::new(ty, start..self.start)
     }
 
     #[inline]

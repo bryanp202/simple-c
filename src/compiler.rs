@@ -8,10 +8,14 @@ use clap::builder::OsStr;
 
 use crate::{
     CompileArgs, CompileFlags,
+    arena::{Arena, TypedArena},
     compiler::{
+        ast::TackyConverter,
         error::{BuildError, CompileError},
         parser::Parser,
+        tacky::AsmConverter,
     },
+    intern::Interner,
 };
 
 mod asm;
@@ -19,6 +23,7 @@ mod ast;
 mod error;
 mod lexer;
 mod parser;
+mod tacky;
 mod token;
 
 pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
@@ -59,8 +64,10 @@ fn assemble(args: CompileArgs, asm_files: Vec<OsString>) -> Result<(), BuildErro
         ));
     }
 
-    for asm_file in &asm_files {
-        std::fs::remove_file(asm_file).expect("Build unit returned bad path");
+    if !args.emit_asm {
+        for asm_file in &asm_files {
+            std::fs::remove_file(asm_file).expect("Build unit returned bad path");
+        }
     }
 
     Ok(())
@@ -124,9 +131,22 @@ fn generate_unit(
     let src = std::fs::read_to_string(i_path).expect("Preprocessor failed to output to temp name");
     std::fs::remove_file(i_path).expect("Preprocessed source was removed early");
 
-    let ast_tree = Parser::new(&src).parse(src_path)?;
-    let program_asm = ast_tree.as_asm();
-    let asm_path = i_path.with_extension("s");
-    program_asm.generate(&asm_path).expect("Failed to write to file");
+    let asm_path = if compile_flags.emit_asm {
+        src_path.with_extension("s")
+    } else {
+        i_path.with_extension("s")
+    };
+
+    let mut id_interner = Interner::new();
+    let ast_arena = Arena::new();
+
+    let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path)?;
+    let tacky_program = TackyConverter::new().convert(ast_tree);
+    let asm_program = AsmConverter::new().convert(tacky_program);
+
+    asm_program
+        .generate(&asm_path)
+        .expect("Failed to write to file");
+
     Ok(asm_path)
 }

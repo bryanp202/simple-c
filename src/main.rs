@@ -1,8 +1,13 @@
+#![feature(allocator_api)]
+#![feature(dropck_eyepatch)]
+#![feature(hash_set_entry)]
+
 use clap::Parser;
 use std::process::ExitCode;
 
 use crate::compiler::compile;
 
+mod arena;
 mod compiler;
 pub mod intern;
 

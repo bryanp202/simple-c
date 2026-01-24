@@ -2,12 +2,36 @@ use std::{
     cmp::Ordering,
     collections::BTreeMap,
     fmt::Display,
-    ops::Range,
+    ops::{Index, Range},
     path::{Path, PathBuf},
 };
 use unicode_width::UnicodeWidthStr;
 
 pub type SyntaxErrorWithCtx = ErrorWithCtx<SyntaxError>;
+
+type ContextInner = u32;
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+pub struct Context(Range<ContextInner>);
+
+impl From<Range<usize>> for Context {
+    fn from(value: Range<usize>) -> Self {
+        Self(value.start as ContextInner..value.end as ContextInner)
+    }
+}
+
+impl Index<Context> for str {
+    type Output = str;
+    fn index(&self, index: Context) -> &Self::Output {
+        &self[index.0.start as usize..index.0.end as usize]
+    }
+}
+
+impl Index<Context> for String {
+    type Output = str;
+    fn index(&self, index: Context) -> &Self::Output {
+        &self.as_str()[index]
+    }
+}
 
 pub enum BuildError {
     AssemblerError(String),
@@ -85,27 +109,39 @@ pub struct CachedError<E: Display> {
 
 #[derive(Debug)]
 pub struct ErrorWithCtx<E: Display> {
-    pub(crate) ctx: Range<usize>,
+    pub(crate) ctx: Context,
     pub(crate) err: E,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SyntaxError {
     AdjacentDigitSeperators,
+    IntegerLiteralTooLarge,
+    InvalidExpr,
     InvalidIntegerSuffix,
+    UnclosedDelimiter,
     UnknownSymbol,
     UnterminatedBlockComment,
 }
 
 impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Syntax error")
+        let msg = match self {
+            Self::IntegerLiteralTooLarge => "integer literal too large",
+            Self::InvalidExpr => "invalid expression",
+            Self::UnclosedDelimiter => "unclosed delimiter",
+            Self::UnknownSymbol => "unknown symbol",
+            Self::UnterminatedBlockComment => "unterminated block comment",
+            _ => "unknown syntax error",
+        };
+        let error_code = *self as usize;
+        write!(f, "[STXE{error_code}] {msg}")
     }
 }
 
 #[derive(Debug)]
 pub struct ErrorCache<E: Display> {
-    lines: Vec<(usize, usize, Range<usize>)>, // (line num, len in chars, range of line)
+    lines: Vec<(usize, usize, Context)>, // (line num, len in chars, range of line)
     cache: String,
     errors: Vec<CachedError<E>>,
 }
@@ -115,15 +151,15 @@ impl<E: Display> ErrorCache<E> {
         let line_ranges = src
             .lines()
             .map(|line| {
-                let start = line.as_ptr() as usize - src.as_ptr() as usize;
+                let start = line.as_ptr().addr() - src.as_ptr().addr();
                 start..start + line.len()
             })
             .collect::<Vec<_>>();
         let mut unique_lines = BTreeMap::new();
         let mut cache = String::new();
 
-        errors.sort_by(|a, b| match a.ctx.start.cmp(&b.ctx.start) {
-            Ordering::Equal => a.ctx.end.cmp(&b.ctx.end),
+        errors.sort_by(|a, b| match a.ctx.0.start.cmp(&b.ctx.0.start) {
+            Ordering::Equal => a.ctx.0.end.cmp(&b.ctx.0.end),
             ord => ord,
         });
         let errors = errors
@@ -144,12 +180,12 @@ impl<E: Display> ErrorCache<E> {
     fn cache_err(
         src: &str,
         line_ranges: &[Range<usize>],
-        unique_lines: &mut BTreeMap<usize, (usize, usize, usize, Range<usize>)>,
+        unique_lines: &mut BTreeMap<usize, (usize, usize, usize, Context)>,
         cache: &mut String,
         err: ErrorWithCtx<E>,
     ) -> CachedError<E> {
-        let start_line = line_ranges.partition_point(|range| range.end < err.ctx.start);
-        let end_line = line_ranges.partition_point(|range| range.start < err.ctx.end);
+        let start_line = line_ranges.partition_point(|range| range.end < err.ctx.0.start as usize);
+        let end_line = line_ranges.partition_point(|range| range.start < err.ctx.0.end as usize);
 
         for line_num in start_line..end_line {
             let count = unique_lines.len();
@@ -157,7 +193,7 @@ impl<E: Display> ErrorCache<E> {
                 let line = &src[line_ranges[line_num].clone()];
                 let buf_start = cache.len();
                 cache.push_str(line);
-                let line_range = buf_start..cache.len();
+                let line_range = Context::from(buf_start..cache.len());
                 let line_width = line.width();
                 let line_id = count;
                 (line_id, line_num + 1, line_width, line_range)
@@ -169,10 +205,12 @@ impl<E: Display> ErrorCache<E> {
 
         // Ensures no panic if an empty src is inputted
         let sub_line_ranges = &line_ranges[start_line..end_line];
-        let start_col =
-            src[sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.start].width();
-        let end_col =
-            src[sub_line_ranges.last().map_or(0, |range| range.start)..err.ctx.end].width();
+        let start_col = src
+            [sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.0.start as usize]
+            .width();
+        let end_col = src
+            [sub_line_ranges.last().map_or(0, |range| range.start)..err.ctx.0.end as usize]
+            .width();
 
         CachedError::<E> {
             line_ids,
@@ -278,11 +316,11 @@ fn multiline_err_cache_test() {
         cool;";
     let errors = vec![
         ErrorWithCtx::<SyntaxError> {
-            ctx: 17..src.len(),
+            ctx: Context::from(17..src.len()),
             err: SyntaxError::AdjacentDigitSeperators,
         },
         ErrorWithCtx::<SyntaxError> {
-            ctx: 11..17,
+            ctx: Context::from(11..17),
             err: SyntaxError::AdjacentDigitSeperators,
         },
     ];
