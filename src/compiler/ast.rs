@@ -1,7 +1,4 @@
-use std::{
-    alloc::{Allocator, Global},
-    fmt::Display,
-};
+use std::alloc::{Allocator, Global};
 
 use crate::{compiler::tacky, intern::Interned};
 

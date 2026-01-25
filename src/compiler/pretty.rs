@@ -50,7 +50,7 @@ impl<A: Allocator> PrettyPrint for ast::Item<'_, A> {
             Self::Fn { name, body } => {
                 writeln!(f, "Fn \"{}\" {{", name.get())?;
                 body.pretty(f, indent + 1)?;
-            },
+            }
         }
         writeln!(f, "{: >spaces$}}},", "")
     }
@@ -80,16 +80,15 @@ impl<A: Allocator> PrettyPrint for ast::Expr<A> {
                 lhs.pretty(f, indent + 1)?;
                 rhs.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
-            },
+            }
             Self::Constant(imm) => {
                 writeln!(f, "Imm {imm},")
-            },
+            }
             Self::Unary(op, operand) => {
                 writeln!(f, "Unary{op} {{")?;
                 operand.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
-            },
+            }
         }
-        
     }
 }

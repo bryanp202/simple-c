@@ -302,7 +302,7 @@ impl<'src> AsmConverter {
                 } else {
                     asm::Inst::IMul(src, dst)
                 }
-            },
+            }
             asm::Inst::IDiv(operand) => {
                 if let Operand::Imm(_) = operand {
                     fixed_insts.push(asm::Inst::Mov(operand, Operand::Reg(Reg::R10)));
@@ -310,7 +310,7 @@ impl<'src> AsmConverter {
                 } else {
                     asm::Inst::IDiv(operand)
                 }
-            },
+            }
             // Other
             asm::Inst::Mov(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Mov, fixed_insts),
             inst => inst,
