@@ -157,7 +157,12 @@ impl<'src> AsmConverter {
                 };
                 asm::Inst::Mov(Operand::Reg(reg), dst)
             }
-            BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub | BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+            BinaryOp::Add
+            | BinaryOp::Mul
+            | BinaryOp::Sub
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor => {
                 asm_insts.push(asm::Inst::Mov(lhs, dst));
                 match op {
                     BinaryOp::Add => asm::Inst::Add(rhs, dst),
