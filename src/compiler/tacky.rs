@@ -191,7 +191,7 @@ impl<'src> AsmConverter {
         match val {
             Val::Const(imm) => asm::Operand::Imm(imm),
             Val::Temp(id) => asm::Operand::Psuedo(id),
-            _ => unreachable!(),
+            _ => todo!(),
         }
     }
 }
@@ -243,7 +243,7 @@ impl<'src> AsmConverter {
     fn fill_operand(&mut self, operand: Operand) -> Operand {
         match operand {
             Operand::Psuedo(num) => Operand::Stack(self.reserve_or_get(num, 4, 4)),
-            operand => operand,
+            Operand::Imm(_) | Operand::Reg(_) | Operand::Stack(_) => operand,
         }
     }
 
@@ -313,7 +313,11 @@ impl<'src> AsmConverter {
             }
             // Other
             asm::Inst::Mov(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Mov, fixed_insts),
-            inst => inst,
+            asm::Inst::AllocateStack(_)
+            | asm::Inst::Cdq
+            | asm::Inst::Neg(_)
+            | asm::Inst::Not(_)
+            | asm::Inst::Ret => inst,
         };
         fixed_insts.push(last_inst);
     }

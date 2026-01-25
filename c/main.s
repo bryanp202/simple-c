@@ -1,5 +1,6 @@
     .globl main
 main:
+    sar $100, %rbx
     pushq %rbp
     movq %rsp, %rbp
     subq $28, %rsp
