@@ -40,8 +40,12 @@ impl<'src> Lexer<'src> {
             '~' => self.emit_token(TokenTy::Tilde),
 
             // Single or double
+            '+' => self.emit_token(TokenTy::Plus),
             '-' if self.eat_if('-') => self.emit_token(TokenTy::MinusMinus),
             '-' => self.emit_token(TokenTy::Minus),
+            '*' => self.emit_token(TokenTy::Star),
+            '/' => self.emit_token(TokenTy::Slash),
+            '%' => self.emit_token(TokenTy::Percent),
             c if c.is_ascii_digit() => self.number(),
             c if c.is_alphabetic() => self.identifier(c),
             _ => self.error(SyntaxError::UnknownSymbol),
@@ -196,7 +200,6 @@ impl<'src> Lexer<'src> {
     }
 }
 
-#[allow(dead_code)]
 pub fn tokenize(input: &str) -> impl Iterator<Item = Token> {
     let mut lexer = Lexer::new(input);
     std::iter::from_fn(move || {

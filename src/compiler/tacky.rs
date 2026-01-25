@@ -1,3 +1,5 @@
+use std::hint::unreachable_unchecked;
+
 use crate::{
     compiler::asm::{self, Operand, Reg},
     intern::Interned,
@@ -21,6 +23,12 @@ pub enum Inst<'src> {
         src: Val<'src>,
         dst: Val<'src>,
     },
+    Binary {
+        op: BinaryOp,
+        lhs: Val<'src>,
+        rhs: Val<'src>,
+        dst: Val<'src>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -33,6 +41,15 @@ pub enum Val<'src> {
 pub enum UnaryOp {
     Compliment,
     Negate,
+}
+
+#[derive(Debug)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Div,
+    Mul,
+    Rem,
 }
 
 pub struct AsmConverter {
@@ -57,10 +74,7 @@ impl AsmConverter {
     pub fn convert<'src>(&mut self, tacky: Program<'src>) -> asm::Program<'src> {
         let asm_program = self.convert_program(tacky);
         let filled_asm_program = self.fill_registers(asm_program);
-        let fixed_asm_program = self.fix(filled_asm_program);
-        //let pseudo_asm = self.fill_registers(raw_asm);
-
-        fixed_asm_program
+        self.fix(filled_asm_program)
     }
 }
 
@@ -103,27 +117,74 @@ impl<'src> AsmConverter {
 
     fn convert_inst(&mut self, inst: Inst, asm_insts: &mut Vec<asm::Inst>) {
         let last_inst = match inst {
-            Inst::Unary { op, src, dst } => {
-                let src = self.convert_val(src);
-                let dst = self.convert_val(dst);
-                asm_insts.push(asm::Inst::Mov { src, dst });
-
-                match op {
-                    UnaryOp::Compliment => asm::Inst::Not(dst),
-                    UnaryOp::Negate => asm::Inst::Neg(dst),
-                }
-            }
+            Inst::Binary { op, lhs, rhs, dst } => self.convert_binary(op, lhs, rhs, dst, asm_insts),
+            Inst::Unary { op, src, dst } => self.convert_unary(op, src, dst, asm_insts),
             Inst::Ret(src) => {
                 let src = self.convert_val(src);
-                asm_insts.push(asm::Inst::Mov {
-                    src,
-                    dst: asm::Operand::Reg(Reg::AX),
-                });
+                asm_insts.push(asm::Inst::Mov(src, asm::Operand::Reg(Reg::AX)));
                 asm::Inst::Ret
             }
         };
 
         asm_insts.push(last_inst);
+    }
+
+    fn convert_binary(
+        &mut self,
+        op: BinaryOp,
+        lhs: Val<'_>,
+        rhs: Val<'_>,
+        dst: Val<'_>,
+        asm_insts: &mut Vec<asm::Inst>,
+    ) -> asm::Inst {
+        match op {
+            BinaryOp::Div | BinaryOp::Rem => {
+                let lhs = self.convert_val(lhs);
+                asm_insts.push(asm::Inst::Mov(lhs, Operand::Reg(Reg::AX)));
+                asm_insts.push(asm::Inst::Cdq);
+                let rhs = self.convert_val(rhs);
+                asm_insts.push(asm::Inst::IDiv(rhs));
+
+                let dst = self.convert_val(dst);
+                let reg = match op {
+                    BinaryOp::Div => Reg::AX,
+                    BinaryOp::Rem => Reg::DX,
+                    // Safety: Outer pattern only matches these two binary ops
+                    _ => unsafe { unreachable_unchecked() },
+                };
+                asm::Inst::Mov(Operand::Reg(reg), dst)
+            }
+            BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub => {
+                let lhs = self.convert_val(lhs);
+                let dst = self.convert_val(dst);
+                asm_insts.push(asm::Inst::Mov(lhs, dst));
+                let rhs = self.convert_val(rhs);
+                match op {
+                    BinaryOp::Add => asm::Inst::Add(rhs, dst),
+                    BinaryOp::Mul => asm::Inst::IMul(rhs, dst),
+                    BinaryOp::Sub => asm::Inst::Sub(rhs, dst),
+                    // Safety: Outer pattern only matches these binary ops
+                    _ => unsafe { unreachable_unchecked() },
+                }
+            }
+        }
+    }
+
+    fn convert_unary(
+        &mut self,
+        op: UnaryOp,
+        src: Val<'_>,
+        dst: Val<'_>,
+        asm_insts: &mut Vec<asm::Inst>,
+    ) -> asm::Inst {
+        let src = self.convert_val(src);
+        let dst = self.convert_val(dst);
+        asm_insts.push(asm::Inst::Mov(src, dst));
+
+        match op {
+            UnaryOp::Compliment => asm::Inst::Not(dst),
+            UnaryOp::Negate => asm::Inst::Neg(dst),
+        }
     }
 
     fn convert_val(&mut self, val: Val) -> asm::Operand {
@@ -133,7 +194,9 @@ impl<'src> AsmConverter {
             _ => unreachable!(),
         }
     }
+}
 
+impl<'src> AsmConverter {
     fn fill_registers(&mut self, program: asm::Program<'src>) -> asm::Program<'src> {
         let item = match program.item {
             asm::Item::Fn { name, insts } => self.fill_function(name, insts),
@@ -156,13 +219,24 @@ impl<'src> AsmConverter {
 
     fn fill_inst(&mut self, inst: asm::Inst) -> asm::Inst {
         match inst {
-            asm::Inst::Mov { src, dst } => asm::Inst::Mov {
-                src: self.fill_operand(src),
-                dst: self.fill_operand(dst),
-            },
+            // Arith
+            asm::Inst::Add(src, dst) => {
+                asm::Inst::Add(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::Sub(src, dst) => {
+                asm::Inst::Sub(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::IMul(src, dst) => {
+                asm::Inst::IMul(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::IDiv(operand) => asm::Inst::IDiv(self.fill_operand(operand)),
             asm::Inst::Not(dst) => asm::Inst::Neg(self.fill_operand(dst)),
             asm::Inst::Neg(dst) => asm::Inst::Neg(self.fill_operand(dst)),
-            inst => inst,
+            // Other
+            asm::Inst::Mov(src, dst) => {
+                asm::Inst::Mov(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::AllocateStack(_) | asm::Inst::Cdq | asm::Inst::Ret => inst,
         }
     }
 
@@ -170,6 +244,24 @@ impl<'src> AsmConverter {
         match operand {
             Operand::Psuedo(num) => Operand::Stack(self.reserve_or_get(num, 4, 4)),
             operand => operand,
+        }
+    }
+
+    /// Fixes an illegal memory to memory asm operation
+    fn fix_mem_to_mem(
+        &mut self,
+        src: Operand,
+        dst: Operand,
+        inst: impl Fn(Operand, Operand) -> asm::Inst,
+        fixed_insts: &mut Vec<asm::Inst>,
+    ) -> asm::Inst {
+        if let Operand::Stack(_) = src
+            && let Operand::Stack(_) = dst
+        {
+            fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::R10)));
+            inst(Operand::Reg(Reg::R10), dst)
+        } else {
+            inst(src, dst)
         }
     }
 
@@ -188,33 +280,41 @@ impl<'src> AsmConverter {
         let mut fixed_insts = vec![asm::Inst::AllocateStack(self.stack)];
 
         for inst in insts {
-            match inst {
-                asm::Inst::Mov { src, dst } => {
-                    if src == dst {
-                        continue;
-                    }
-
-                    if let src @ Operand::Stack(_) = src
-                        && let dst @ Operand::Stack(_) = dst
-                    {
-                        fixed_insts.push(asm::Inst::Mov {
-                            src,
-                            dst: Operand::Reg(Reg::R10),
-                        });
-                        fixed_insts.push(asm::Inst::Mov {
-                            src: Operand::Reg(Reg::R10),
-                            dst,
-                        });
-                    }
-                }
-
-                inst => fixed_insts.push(inst),
-            }
+            self.fix_inst(inst, &mut fixed_insts);
         }
 
         asm::Item::Fn {
             name,
             insts: fixed_insts,
         }
+    }
+
+    fn fix_inst(&mut self, inst: asm::Inst, fixed_insts: &mut Vec<asm::Inst>) {
+        let last_inst = match inst {
+            // Arith
+            asm::Inst::Add(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Add, fixed_insts),
+            asm::Inst::Sub(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Sub, fixed_insts),
+            asm::Inst::IMul(src, dst) => {
+                if let Operand::Stack(_) = dst {
+                    fixed_insts.push(asm::Inst::Mov(dst, Operand::Reg(Reg::R11)));
+                    fixed_insts.push(asm::Inst::IMul(src, Operand::Reg(Reg::R11)));
+                    asm::Inst::Mov(Operand::Reg(Reg::R11), dst)
+                } else {
+                    asm::Inst::IMul(src, dst)
+                }
+            },
+            asm::Inst::IDiv(operand) => {
+                if let Operand::Stack(_) = operand {
+                    fixed_insts.push(asm::Inst::Mov(operand, Operand::Reg(Reg::R10)));
+                    asm::Inst::IDiv(Operand::Reg(Reg::R10))
+                } else {
+                    asm::Inst::IDiv(operand)
+                }
+            },
+            // Other
+            asm::Inst::Mov(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Mov, fixed_insts),
+            inst => inst,
+        };
+        fixed_insts.push(last_inst);
     }
 }

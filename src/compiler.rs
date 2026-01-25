@@ -8,7 +8,7 @@ use clap::builder::OsStr;
 
 use crate::{
     CompileArgs, CompileFlags,
-    arena::{Arena, TypedArena},
+    arena::Arena,
     compiler::{
         ast::TackyConverter,
         error::{BuildError, CompileError},
@@ -23,6 +23,7 @@ mod ast;
 mod error;
 mod lexer;
 mod parser;
+mod pretty;
 mod tacky;
 mod token;
 
@@ -140,7 +141,11 @@ fn generate_unit(
     let mut id_interner = Interner::new();
     let ast_arena = Arena::new();
 
-    let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path)?;
+    let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path.clone())?;
+    if compile_flags.show_pretty_ast {
+        println!("{}: {ast_tree}", src_path.display());
+    }
+
     let tacky_program = TackyConverter::new().convert(ast_tree);
     let asm_program = AsmConverter::new().convert(tacky_program);
 

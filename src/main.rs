@@ -20,33 +20,33 @@ struct CompileArgs {
     /// Output destination
     #[arg(short = 'o', long = "output")]
     output: Option<std::path::PathBuf>,
-    /// Stop after lexing stage
-    #[arg(long = "lex")]
-    stop_after_lex: bool,
-    /// Stop after parsing stage
-    #[arg(long = "parse")]
-    stop_after_parse: bool,
-    /// Stop after code generation stage
-    #[arg(long = "codegen")]
-    stop_after_codegen: bool,
+    /// Pretty print the ast
+    #[arg(long)]
+    pretty_ast: bool,
+    /// Pretty print TACKY IR
+    #[arg(long)]
+    pretty_tacky: bool,
+    /// Pretty print ASM IR
+    #[arg(long)]
+    pretty_asm: bool,
     /// Emit assembly files
     #[arg(short = 'S')]
     emit_asm: bool,
 }
 
 struct CompileFlags {
-    stop_after_lex: bool,
-    stop_after_parse: bool,
-    stop_after_codegen: bool,
+    show_pretty_ast: bool,
+    show_pretty_tacky: bool,
+    show_pretty_asm: bool,
     emit_asm: bool,
 }
 
 impl CompileArgs {
     fn flags(&self) -> CompileFlags {
         CompileFlags {
-            stop_after_codegen: self.stop_after_codegen,
-            stop_after_lex: self.stop_after_lex,
-            stop_after_parse: self.stop_after_parse,
+            show_pretty_ast: self.pretty_ast,
+            show_pretty_tacky: self.pretty_tacky,
+            show_pretty_asm: self.pretty_asm,
             emit_asm: self.emit_asm,
         }
     }

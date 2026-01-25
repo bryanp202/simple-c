@@ -69,10 +69,20 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         &self.src[token.ctx.clone()]
     }
 
+    /// Returns an error from the previous token
     #[inline]
     fn error(&self, err: SyntaxError) -> SyntaxErrorWithCtx {
         SyntaxErrorWithCtx {
             ctx: self.prev.ctx.clone(),
+            err,
+        }
+    }
+
+    /// Returns an error from the current token
+    #[inline]
+    fn error_at(&self, err: SyntaxError) -> SyntaxErrorWithCtx {
+        SyntaxErrorWithCtx {
+            ctx: self.curr.ctx.clone(),
             err,
         }
     }
@@ -82,8 +92,23 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         self.errors.push(err_with_ctx);
     }
 
+    #[inline]
     fn at_end(&self) -> bool {
         matches!(self.curr.ty, TokenTy::Eof)
+    }
+
+    #[inline]
+    fn check(&self, expected: TokenTy) -> bool {
+        self.curr.ty == expected
+    }
+
+    fn check_any(&self, iter: impl IntoIterator<Item = TokenTy>) -> bool {
+        iter.into_iter().any(|expected| self.check(expected))
+    }
+
+    #[inline]
+    fn peek(&self) -> TokenTy {
+        self.curr.ty
     }
 
     fn advance_unchecked(&mut self) {
@@ -92,18 +117,13 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         self.prev = prev;
     }
 
-    fn advance(&mut self) -> Result<(), SyntaxErrorWithCtx> {
-        self.advance_unchecked();
-
+    fn advance(&mut self) -> Result<TokenTy, SyntaxErrorWithCtx> {
         if let TokenTy::Err(err) = self.curr.ty {
-            Err(self.error(err))
+            Err(self.error_at(err))
         } else {
-            Ok(())
+            self.advance_unchecked();
+            Ok(self.prev.ty)
         }
-    }
-
-    fn check(&mut self, expected: TokenTy) -> bool {
-        self.curr.ty == expected
     }
 
     fn eat(&mut self, expected: TokenTy, err: SyntaxError) -> Result<(), SyntaxErrorWithCtx> {
@@ -111,28 +131,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             self.advance_unchecked();
             Ok(())
         } else {
-            Err(SyntaxErrorWithCtx {
-                ctx: self.curr.ctx.clone(),
-                err,
-            })
-        }
-    }
-
-    fn eat_if(&mut self, expected: TokenTy) -> bool {
-        if self.check(expected) {
-            self.advance_unchecked();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn eat_if_any<I: IntoIterator<Item = TokenTy>>(&mut self, iter: I) -> bool {
-        if iter.into_iter().any(|expected| self.check(expected)) {
-            self.advance_unchecked();
-            true
-        } else {
-            false
+            Err(self.error_at(err))
         }
     }
 
@@ -171,31 +170,55 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         Ok(Stmt::Return(self.alloc_expr(expr)))
     }
 
+    #[inline]
     fn expr(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        if self.eat_if(TokenTy::Const) {
-            self.constant()
-        } else if self.eat_if_any([TokenTy::Minus, TokenTy::Tilde]) {
-            self.unary()
-        } else if self.eat_if(TokenTy::OpenParen) {
-            let expr = self.expr()?;
-            self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
-            Ok(expr)
-        } else {
-            self.advance()?;
-            Err(self.error(SyntaxError::InvalidExpr))
+        self.expr_with_precedence(0)
+    }
+
+    fn expr_with_precedence(&mut self, prec: usize) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
+        let mut lhs = self.unary()?;
+
+        while let Some((new_prec, op)) = self.peek().binary_prec()
+            && new_prec > prec
+        {
+            self.advance_unchecked();
+            let rhs = self.expr_with_precedence(new_prec)?;
+            let new_lhs = Expr::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs));
+            lhs = new_lhs;
         }
+
+        Ok(lhs)
     }
 
     fn unary(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        let op = match self.prev.ty {
-            TokenTy::Minus => UnaryOp::Negate,
-            TokenTy::Tilde => UnaryOp::Compliment,
-            _ => unreachable!(),
-        };
+        const UNARY_OPS: [TokenTy; 2] = [TokenTy::Minus, TokenTy::Tilde];
 
-        let expr = self.expr()?;
+        if self.check_any(UNARY_OPS) {
+            self.advance_unchecked();
+            let op = match self.prev.ty {
+                TokenTy::Minus => UnaryOp::Negate,
+                TokenTy::Tilde => UnaryOp::Compliment,
+                _ => unreachable!(),
+            };
+            let operand = self.unary()?;
+            Ok(Expr::Unary(op, self.alloc_expr(operand)))
+        } else {
+            self.literal()
+        }
+    }
 
-        Ok(Expr::Unary(op, self.alloc_expr(expr)))
+    fn literal(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
+        let ty = self.advance()?;
+
+        match ty {
+            TokenTy::Const => self.constant(),
+            TokenTy::OpenParen => {
+                let expr = self.expr()?;
+                self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
+                Ok(expr)
+            }
+            _ => Err(self.error(SyntaxError::InvalidExpr)),
+        }
     }
 
     fn constant(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {

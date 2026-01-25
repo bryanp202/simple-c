@@ -1,4 +1,7 @@
-use std::alloc::{Allocator, Global};
+use std::{
+    alloc::{Allocator, Global},
+    fmt::Display,
+};
 
 use crate::{compiler::tacky, intern::Interned};
 
@@ -20,13 +23,23 @@ pub enum Stmt<A: Allocator = Global> {
 #[derive(PartialEq, Eq, Hash)]
 pub enum Expr<A: Allocator> {
     Constant(i32),
-    Unary(UnaryOp, Box<Expr<A>, A>),
+    Unary(UnaryOp, Box<Expr<A>, A>),                    // Op, operand
+    Binary(BinaryOp, Box<Expr<A>, A>, Box<Expr<A>, A>), // Op, lhs, rhs
 }
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Compliment,
     Negate,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Div,
+    Mul,
+    Rem,
 }
 
 pub struct TackyConverter {
@@ -87,7 +100,29 @@ impl<'src> TackyConverter {
         match expr {
             Expr::Constant(imm) => tacky::Val::Const(imm),
             Expr::Unary(op, expr) => self.unary(op, *expr, insts),
+            Expr::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
         }
+    }
+
+    fn binary<A: Allocator>(
+        &mut self,
+        ast_op: BinaryOp,
+        lhs: Expr<A>,
+        rhs: Expr<A>,
+        insts: &mut Vec<tacky::Inst<'src>>,
+    ) -> tacky::Val<'src> {
+        let op = match ast_op {
+            BinaryOp::Add => tacky::BinaryOp::Add,
+            BinaryOp::Div => tacky::BinaryOp::Div,
+            BinaryOp::Mul => tacky::BinaryOp::Mul,
+            BinaryOp::Rem => tacky::BinaryOp::Rem,
+            BinaryOp::Sub => tacky::BinaryOp::Sub,
+        };
+        let lhs = self.expr(lhs, insts);
+        let rhs = self.expr(rhs, insts);
+        let dst = self.new_temp();
+        insts.push(tacky::Inst::Binary { op, lhs, rhs, dst });
+        dst
     }
 
     fn unary(

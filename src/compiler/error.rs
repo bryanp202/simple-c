@@ -22,7 +22,9 @@ impl From<Range<usize>> for Context {
 impl Index<Context> for str {
     type Output = str;
     fn index(&self, index: Context) -> &Self::Output {
-        &self[index.0.start as usize..index.0.end as usize]
+        let start = index.0.start as usize;
+        let end = index.0.end as usize;
+        &self[start..end]
     }
 }
 
