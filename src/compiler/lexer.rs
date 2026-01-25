@@ -24,38 +24,48 @@ impl<'src> Lexer<'src> {
 
     pub fn advance_token(&mut self) -> Token {
         if let Err(err) = self.skip_whitespace() {
-            return self.error(err);
+            return self.emit_token(self.error(err));
         }
         let Some(c) = self.advance() else {
             return self.emit_token(TokenTy::Eof);
         };
 
-        match c {
+        let ty = match c {
             // Single
-            ';' => self.emit_token(TokenTy::Semicolon),
-            '(' => self.emit_token(TokenTy::OpenParen),
-            ')' => self.emit_token(TokenTy::CloseParen),
-            '{' => self.emit_token(TokenTy::OpenBrace),
-            '}' => self.emit_token(TokenTy::CloseBrace),
-            '~' => self.emit_token(TokenTy::Tilde),
+            ';' => TokenTy::Semicolon,
+            '(' => TokenTy::OpenParen,
+            ')' => TokenTy::CloseParen,
+            '{' => TokenTy::OpenBrace,
+            '}' => TokenTy::CloseBrace,
+            '~' => TokenTy::Tilde,
 
             // Single or double
-            '+' => self.emit_token(TokenTy::Plus),
-            '-' if self.eat_if('-') => self.emit_token(TokenTy::MinusMinus),
-            '-' => self.emit_token(TokenTy::Minus),
-            '*' => self.emit_token(TokenTy::Star),
-            '/' => self.emit_token(TokenTy::Slash),
-            '%' => self.emit_token(TokenTy::Percent),
-            '=' if self.eat_if('=') => self.emit_token(TokenTy::EqualEqual),
-            '=' => self.emit_token(TokenTy::Equal),
-            '>' if self.eat_if('>') => self.emit_token(TokenTy::GreaterGreater),
-            '>' => self.emit_token(TokenTy::Greater),
-            '<' if self.eat_if('<') => self.emit_token(TokenTy::LessLess),
-            '<' => self.emit_token(TokenTy::Less),
+            // Arith
+            '+' => TokenTy::Plus,
+            '-' if self.eat_if('-') => TokenTy::MinusMinus,
+            '-' => TokenTy::Minus,
+            '*' => TokenTy::Star,
+            '/' => TokenTy::Slash,
+            '%' => TokenTy::Percent,
+            // Compare/Shift
+            '=' if self.eat_if('=') => TokenTy::EqualEqual,
+            '=' => TokenTy::Equal,
+            '>' if self.eat_if('>') => TokenTy::GreaterGreater,
+            '>' => TokenTy::Greater,
+            '<' if self.eat_if('<') => TokenTy::LessLess,
+            '<' => TokenTy::Less,
+            // Bitwise
+            '&' => TokenTy::Ampersand,
+            '^' => TokenTy::Caret,
+            '|' => TokenTy::Pipe,
+
+            // Special
             c if c.is_ascii_digit() => self.number(),
             c if c.is_alphabetic() => self.identifier(c),
             _ => self.error(SyntaxError::UnknownSymbol),
-        }
+        };
+
+        self.emit_token(ty)
     }
 }
 
@@ -73,8 +83,8 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline]
-    fn error(&mut self, err: SyntaxError) -> Token {
-        self.emit_token(TokenTy::Err(err))
+    fn error(&self, err: SyntaxError) -> TokenTy {
+        TokenTy::Err(err)
     }
 
     #[inline]
@@ -163,7 +173,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// A number, both integers and floats
-    fn number(&mut self) -> Token {
+    fn number(&mut self) -> TokenTy {
         self.eat_while(|c| c.is_ascii_alphanumeric());
         match self.peek() {
             '.' | 'e' => self.float(),
@@ -171,17 +181,17 @@ impl<'src> Lexer<'src> {
                 self.eat_while(|c| c.is_ascii_alphanumeric());
                 self.error(SyntaxError::InvalidIntegerSuffix)
             }
-            _ => self.emit_token(TokenTy::Const),
+            _ => TokenTy::Const,
         }
     }
 
     /// A floating point literal
-    fn float(&mut self) -> Token {
+    fn float(&mut self) -> TokenTy {
         self.error(SyntaxError::UnknownSymbol)
     }
 
     /// Check if keyword, else emit identifier
-    fn identifier(&mut self, c: char) -> Token {
+    fn identifier(&mut self, c: char) -> TokenTy {
         match c {
             'i' => return self.check_keyword(TokenTy::Int, "nt"),
             'r' => return self.check_keyword(TokenTy::Return, "eturn"),
@@ -189,19 +199,19 @@ impl<'src> Lexer<'src> {
             _ => {}
         }
         self.eat_while(char::is_alphanumeric);
-        self.emit_token(TokenTy::Identifier)
+        TokenTy::Identifier
     }
 
     /// Check if the rest remaining alphanumeric chars make up the target keyword
-    fn check_keyword(&mut self, target_ty: TokenTy, target: &str) -> Token {
+    fn check_keyword(&mut self, target_ty: TokenTy, target: &str) -> TokenTy {
         let is_target = &self.chars.as_str()[..target.len()] == target;
 
         if is_target {
             self.chars = self.chars.as_str()[target.len()..].char_indices();
-            self.emit_token(target_ty)
+            target_ty
         } else {
             self.eat_while(char::is_alphanumeric);
-            self.emit_token(TokenTy::Identifier)
+            TokenTy::Identifier
         }
     }
 }

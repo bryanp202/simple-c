@@ -29,9 +29,15 @@ pub enum Inst {
     Add(Operand, Operand),
     Sub(Operand, Operand),
     IMul(Operand, Operand),
-    IDiv(Operand),
+    // Shift
     Shl(Operand, Operand),
-    Shr(Operand, Operand),
+    Sar(Operand, Operand),
+    // Bitwise
+    And(Operand, Operand),
+    Or(Operand, Operand),
+    Xor(Operand, Operand),
+    // Unary
+    IDiv(Operand),
     Neg(Operand),
     Not(Operand),
     // Other
@@ -129,8 +135,14 @@ impl Display for Inst {
             Self::Add(src, dst) => write!(f, "addl {}, {}", src.display_d(), dst.display_d()),
             Self::Sub(src, dst) => write!(f, "subl {}, {}", src.display_d(), dst.display_d()),
             Self::IMul(src, dst) => write!(f, "imull {}, {}", src.display_d(), dst.display_d()),
+            // Shift
             Self::Shl(src, dst) => write!(f, "shl {}, {}", src.display_b(), dst.display_d()),
-            Self::Shr(src, dst) => write!(f, "shr {}, {}", src.display_b(), dst.display_d()),
+            Self::Sar(src, dst) => write!(f, "sar {}, {}", src.display_b(), dst.display_d()),
+            // Bitwise
+            Self::And(src, dst) => write!(f, "and {}, {}", src.display_d(), dst.display_d()),
+            Self::Or(src, dst) => write!(f, "or {}, {}", src.display_d(), dst.display_d()),
+            Self::Xor(src, dst) => write!(f, "xor {}, {}", src.display_d(), dst.display_d()),
+            // Special
             Self::IDiv(operand) => write!(f, "idivl {}", operand.display_d()),
             Self::Neg(dst) => write!(f, "negl {}", dst.display_d()),
             Self::Not(dst) => write!(f, "notl {}", dst.display_d()),

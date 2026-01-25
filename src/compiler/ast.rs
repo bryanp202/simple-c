@@ -39,6 +39,9 @@ pub enum BinaryOp {
     Rem,
     Shl,
     Shr,
+    BitAnd,
+    BitXor,
+    BitOr,
 }
 
 pub struct TackyConverter {
@@ -117,7 +120,10 @@ impl<'src> TackyConverter {
             BinaryOp::Rem => tacky::BinaryOp::Rem,
             BinaryOp::Sub => tacky::BinaryOp::Sub,
             BinaryOp::Shl => tacky::BinaryOp::Shl,
-            BinaryOp::Shr => tacky::BinaryOp::Shr,
+            BinaryOp::Shr => tacky::BinaryOp::Sar,
+            BinaryOp::BitAnd => tacky::BinaryOp::BitAnd,
+            BinaryOp::BitOr => tacky::BinaryOp::BitOr,
+            BinaryOp::BitXor => tacky::BinaryOp::BitXor,
         };
         let lhs = self.expr(lhs, insts);
         let rhs = self.expr(rhs, insts);

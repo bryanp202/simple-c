@@ -1,5 +1,3 @@
-use std::hint::unreachable_unchecked;
-
 use crate::{
     compiler::asm::{self, Operand, Reg},
     intern::Interned,
@@ -51,7 +49,10 @@ pub enum BinaryOp {
     Mul,
     Rem,
     Shl,
-    Shr,
+    Sar,
+    BitAnd,
+    BitOr,
+    BitXor,
 }
 
 pub struct AsmConverter {
@@ -152,28 +153,29 @@ impl<'src> AsmConverter {
                 let reg = match op {
                     BinaryOp::Div => Reg::AX,
                     BinaryOp::Rem => Reg::DX,
-                    // Safety: Outer pattern only matches these two binary ops
-                    _ => unsafe { unreachable_unchecked() },
+                    _ => unreachable!(),
                 };
                 asm::Inst::Mov(Operand::Reg(reg), dst)
             }
-            BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub => {
+            BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub | BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
                 asm_insts.push(asm::Inst::Mov(lhs, dst));
                 match op {
                     BinaryOp::Add => asm::Inst::Add(rhs, dst),
                     BinaryOp::Mul => asm::Inst::IMul(rhs, dst),
                     BinaryOp::Sub => asm::Inst::Sub(rhs, dst),
-                    // Safety: Outer pattern only matches these binary ops
-                    _ => unsafe { unreachable_unchecked() },
+                    BinaryOp::BitAnd => asm::Inst::And(rhs, dst),
+                    BinaryOp::BitOr => asm::Inst::Or(rhs, dst),
+                    BinaryOp::BitXor => asm::Inst::Xor(rhs, dst),
+                    _ => unreachable!(),
                 }
             }
-            BinaryOp::Shl | BinaryOp::Shr => {
+            BinaryOp::Shl | BinaryOp::Sar => {
                 asm_insts.push(asm::Inst::Mov(lhs, dst));
                 match op {
                     BinaryOp::Shl => asm::Inst::Shl(rhs, dst),
-                    BinaryOp::Shr => asm::Inst::Shr(rhs, dst),
+                    BinaryOp::Sar => asm::Inst::Sar(rhs, dst),
                     // Safety: Outer pattern only matches these binary ops
-                    _ => unsafe { unreachable_unchecked() },
+                    _ => unreachable!(),
                 }
             }
         }
@@ -238,12 +240,24 @@ impl<'src> AsmConverter {
             asm::Inst::IMul(src, dst) => {
                 asm::Inst::IMul(self.fill_operand(src), self.fill_operand(dst))
             }
+            // Shift
             asm::Inst::Shl(src, dst) => {
                 asm::Inst::Shl(self.fill_operand(src), self.fill_operand(dst))
             }
-            asm::Inst::Shr(src, dst) => {
-                asm::Inst::Shr(self.fill_operand(src), self.fill_operand(dst))
+            asm::Inst::Sar(src, dst) => {
+                asm::Inst::Sar(self.fill_operand(src), self.fill_operand(dst))
             }
+            // Bitwise
+            asm::Inst::And(src, dst) => {
+                asm::Inst::And(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::Or(src, dst) => {
+                asm::Inst::Or(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::Xor(src, dst) => {
+                asm::Inst::Xor(self.fill_operand(src), self.fill_operand(dst))
+            }
+            // Special
             asm::Inst::IDiv(operand) => asm::Inst::IDiv(self.fill_operand(operand)),
             asm::Inst::Not(dst) => asm::Inst::Neg(self.fill_operand(dst)),
             asm::Inst::Neg(dst) => asm::Inst::Neg(self.fill_operand(dst)),
@@ -318,6 +332,7 @@ impl<'src> AsmConverter {
                     asm::Inst::IMul(src, dst)
                 }
             }
+            // Shift
             asm::Inst::Shl(src, dst) => {
                 if matches!(src, Operand::Imm(imm) if imm > u8::MAX.into())
                     || matches!(src, Operand::Stack(_))
@@ -328,16 +343,21 @@ impl<'src> AsmConverter {
                     asm::Inst::Shl(src, dst)
                 }
             }
-            asm::Inst::Shr(src, dst) => {
+            asm::Inst::Sar(src, dst) => {
                 if matches!(src, Operand::Imm(imm) if imm > u8::MAX.into())
                     || matches!(src, Operand::Stack(_))
                 {
                     fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::CX)));
-                    asm::Inst::Shr(Operand::Reg(Reg::CX), dst)
+                    asm::Inst::Sar(Operand::Reg(Reg::CX), dst)
                 } else {
-                    asm::Inst::Shr(src, dst)
+                    asm::Inst::Sar(src, dst)
                 }
             }
+            // Bitwise
+            asm::Inst::And(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::And, fixed_insts),
+            asm::Inst::Or(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Or, fixed_insts),
+            asm::Inst::Xor(src, dst) => self.fix_mem_to_mem(src, dst, asm::Inst::Xor, fixed_insts),
+            // Special
             asm::Inst::IDiv(operand) => {
                 if let Operand::Imm(_) = operand {
                     fixed_insts.push(asm::Inst::Mov(operand, Operand::Reg(Reg::R10)));

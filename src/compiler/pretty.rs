@@ -29,6 +29,9 @@ impl Display for ast::BinaryOp {
             Self::Sub => "-",
             Self::Shl => "<<",
             Self::Shr => ">>",
+            Self::BitAnd => "&",
+            Self::BitOr => "|",
+            Self::BitXor => "^",
         };
         write!(f, "{c}")
     }

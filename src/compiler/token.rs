@@ -33,6 +33,9 @@ pub enum TokenTy {
     GreaterGreater,
     Less,
     LessLess,
+    Ampersand,
+    Caret,
+    Pipe,
     // Special
     Err(SyntaxError),
     Eof,
@@ -47,6 +50,9 @@ impl TokenTy {
         const PRODUCT: usize = 50;
         const TERM: usize = 45;
         const SHIFT: usize = 40;
+        const BIT_AND: usize = 35;
+        const BIT_XOR: usize = 30;
+        const BIT_OR: usize = 25;
 
         match self {
             Star => Some((PRODUCT, BinaryOp::Mul)),
@@ -56,6 +62,9 @@ impl TokenTy {
             Minus => Some((TERM, BinaryOp::Sub)),
             GreaterGreater => Some((SHIFT, BinaryOp::Shr)),
             LessLess => Some((SHIFT, BinaryOp::Shl)),
+            Ampersand => Some((BIT_AND, BinaryOp::BitAnd)),
+            Caret => Some((BIT_XOR, BinaryOp::BitXor)),
+            Pipe => Some((BIT_OR, BinaryOp::BitOr)),
             _ => None,
         }
     }
