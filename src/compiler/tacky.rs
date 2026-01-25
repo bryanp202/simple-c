@@ -304,7 +304,7 @@ impl<'src> AsmConverter {
                 }
             },
             asm::Inst::IDiv(operand) => {
-                if let Operand::Stack(_) = operand {
+                if let Operand::Imm(_) = operand {
                     fixed_insts.push(asm::Inst::Mov(operand, Operand::Reg(Reg::R10)));
                     asm::Inst::IDiv(Operand::Reg(Reg::R10))
                 } else {

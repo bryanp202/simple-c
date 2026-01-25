@@ -117,7 +117,8 @@ pub struct ErrorWithCtx<E: Display> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SyntaxError {
-    AdjacentDigitSeperators,
+    ExpectedFunctionArgs,
+    ExpectedSemicolon,
     IntegerLiteralTooLarge,
     InvalidExpr,
     InvalidIntegerSuffix,
@@ -129,12 +130,14 @@ pub enum SyntaxError {
 impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
+            Self::ExpectedFunctionArgs => "expected function args after function identifier",
+            Self::ExpectedSemicolon => "expected semicolon after statement",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidExpr => "invalid expression",
+            Self::InvalidIntegerSuffix => "invalid integer suffix",
             Self::UnclosedDelimiter => "unclosed delimiter",
             Self::UnknownSymbol => "unknown symbol",
             Self::UnterminatedBlockComment => "unterminated block comment",
-            _ => "unknown syntax error",
         };
         let error_code = *self as usize;
         write!(f, "[STXE{error_code}] {msg}")
@@ -319,11 +322,11 @@ fn multiline_err_cache_test() {
     let errors = vec![
         ErrorWithCtx::<SyntaxError> {
             ctx: Context::from(17..src.len()),
-            err: SyntaxError::AdjacentDigitSeperators,
+            err: SyntaxError::InvalidExpr,
         },
         ErrorWithCtx::<SyntaxError> {
             ctx: Context::from(11..17),
-            err: SyntaxError::AdjacentDigitSeperators,
+            err: SyntaxError::InvalidExpr,
         },
     ];
     let error_msg = CompileError::from_syntax_errors(src, "test.c".into(), errors).to_string();

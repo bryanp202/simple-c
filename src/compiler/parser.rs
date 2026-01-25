@@ -131,7 +131,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             self.advance_unchecked();
             Ok(())
         } else {
-            Err(self.error_at(err))
+            self.advance()?;
+            Err(self.error(err))
         }
     }
 
@@ -151,8 +152,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         let name_token = self.prev.clone();
         let name = self.id_interner.intern(&self.src[name_token.ctx]);
 
-        self.eat(TokenTy::OpenParen, SyntaxError::AdjacentDigitSeperators)?;
-        self.eat(TokenTy::CloseParen, SyntaxError::AdjacentDigitSeperators)?;
+        self.eat(TokenTy::OpenParen, SyntaxError::ExpectedFunctionArgs)?;
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
         self.eat(TokenTy::OpenBrace, SyntaxError::UnterminatedBlockComment)?;
 
         let body = self.stmt()?;
@@ -163,9 +164,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     fn stmt(&mut self) -> Result<Stmt<'arena>, SyntaxErrorWithCtx> {
-        self.eat(TokenTy::Return, SyntaxError::AdjacentDigitSeperators)?;
+        self.eat(TokenTy::Return, SyntaxError::InvalidExpr)?;
         let expr = self.expr()?;
-        self.eat(TokenTy::Semicolon, SyntaxError::AdjacentDigitSeperators)?;
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
 
         Ok(Stmt::Return(self.alloc_expr(expr)))
     }
