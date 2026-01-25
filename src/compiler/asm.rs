@@ -30,6 +30,8 @@ pub enum Inst {
     Sub(Operand, Operand),
     IMul(Operand, Operand),
     IDiv(Operand),
+    Shl(Operand, Operand),
+    Shr(Operand, Operand),
     Neg(Operand),
     Not(Operand),
     // Other
@@ -127,6 +129,8 @@ impl Display for Inst {
             Self::Add(src, dst) => write!(f, "addl {}, {}", src.display_d(), dst.display_d()),
             Self::Sub(src, dst) => write!(f, "subl {}, {}", src.display_d(), dst.display_d()),
             Self::IMul(src, dst) => write!(f, "imull {}, {}", src.display_d(), dst.display_d()),
+            Self::Shl(src, dst) => write!(f, "shl {}, {}", src.display_b(), dst.display_d()),
+            Self::Shr(src, dst) => write!(f, "shr {}, {}", src.display_b(), dst.display_d()),
             Self::IDiv(operand) => write!(f, "idivl {}", operand.display_d()),
             Self::Neg(dst) => write!(f, "negl {}", dst.display_d()),
             Self::Not(dst) => write!(f, "notl {}", dst.display_d()),

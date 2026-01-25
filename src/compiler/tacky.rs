@@ -50,6 +50,8 @@ pub enum BinaryOp {
     Div,
     Mul,
     Rem,
+    Shl,
+    Shr,
 }
 
 pub struct AsmConverter {
@@ -137,15 +139,16 @@ impl<'src> AsmConverter {
         dst: Val<'_>,
         asm_insts: &mut Vec<asm::Inst>,
     ) -> asm::Inst {
+        let lhs = self.convert_val(lhs);
+        let rhs = self.convert_val(rhs);
+        let dst = self.convert_val(dst);
+
         match op {
             BinaryOp::Div | BinaryOp::Rem => {
-                let lhs = self.convert_val(lhs);
                 asm_insts.push(asm::Inst::Mov(lhs, Operand::Reg(Reg::AX)));
                 asm_insts.push(asm::Inst::Cdq);
-                let rhs = self.convert_val(rhs);
                 asm_insts.push(asm::Inst::IDiv(rhs));
 
-                let dst = self.convert_val(dst);
                 let reg = match op {
                     BinaryOp::Div => Reg::AX,
                     BinaryOp::Rem => Reg::DX,
@@ -155,14 +158,20 @@ impl<'src> AsmConverter {
                 asm::Inst::Mov(Operand::Reg(reg), dst)
             }
             BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub => {
-                let lhs = self.convert_val(lhs);
-                let dst = self.convert_val(dst);
                 asm_insts.push(asm::Inst::Mov(lhs, dst));
-                let rhs = self.convert_val(rhs);
                 match op {
                     BinaryOp::Add => asm::Inst::Add(rhs, dst),
                     BinaryOp::Mul => asm::Inst::IMul(rhs, dst),
                     BinaryOp::Sub => asm::Inst::Sub(rhs, dst),
+                    // Safety: Outer pattern only matches these binary ops
+                    _ => unsafe { unreachable_unchecked() },
+                }
+            }
+            BinaryOp::Shl | BinaryOp::Shr => {
+                asm_insts.push(asm::Inst::Mov(lhs, dst));
+                match op {
+                    BinaryOp::Shl => asm::Inst::Shl(rhs, dst),
+                    BinaryOp::Shr => asm::Inst::Shr(rhs, dst),
                     // Safety: Outer pattern only matches these binary ops
                     _ => unsafe { unreachable_unchecked() },
                 }
@@ -228,6 +237,12 @@ impl<'src> AsmConverter {
             }
             asm::Inst::IMul(src, dst) => {
                 asm::Inst::IMul(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::Shl(src, dst) => {
+                asm::Inst::Shl(self.fill_operand(src), self.fill_operand(dst))
+            }
+            asm::Inst::Shr(src, dst) => {
+                asm::Inst::Shr(self.fill_operand(src), self.fill_operand(dst))
             }
             asm::Inst::IDiv(operand) => asm::Inst::IDiv(self.fill_operand(operand)),
             asm::Inst::Not(dst) => asm::Inst::Neg(self.fill_operand(dst)),
@@ -301,6 +316,26 @@ impl<'src> AsmConverter {
                     asm::Inst::Mov(Operand::Reg(Reg::R11), dst)
                 } else {
                     asm::Inst::IMul(src, dst)
+                }
+            }
+            asm::Inst::Shl(src, dst) => {
+                if matches!(src, Operand::Imm(imm) if imm > u8::MAX.into())
+                    || matches!(src, Operand::Stack(_))
+                {
+                    fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::CX)));
+                    asm::Inst::Shl(Operand::Reg(Reg::CX), dst)
+                } else {
+                    asm::Inst::Shl(src, dst)
+                }
+            }
+            asm::Inst::Shr(src, dst) => {
+                if matches!(src, Operand::Imm(imm) if imm > u8::MAX.into())
+                    || matches!(src, Operand::Stack(_))
+                {
+                    fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::CX)));
+                    asm::Inst::Shr(Operand::Reg(Reg::CX), dst)
+                } else {
+                    asm::Inst::Shr(src, dst)
                 }
             }
             asm::Inst::IDiv(operand) => {

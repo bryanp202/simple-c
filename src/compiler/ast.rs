@@ -37,6 +37,8 @@ pub enum BinaryOp {
     Div,
     Mul,
     Rem,
+    Shl,
+    Shr,
 }
 
 pub struct TackyConverter {
@@ -114,6 +116,8 @@ impl<'src> TackyConverter {
             BinaryOp::Mul => tacky::BinaryOp::Mul,
             BinaryOp::Rem => tacky::BinaryOp::Rem,
             BinaryOp::Sub => tacky::BinaryOp::Sub,
+            BinaryOp::Shl => tacky::BinaryOp::Shl,
+            BinaryOp::Shr => tacky::BinaryOp::Shr,
         };
         let lhs = self.expr(lhs, insts);
         let rhs = self.expr(rhs, insts);

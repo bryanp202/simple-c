@@ -27,6 +27,12 @@ pub enum TokenTy {
     Plus,
     Slash,
     Star,
+    Equal,
+    EqualEqual,
+    Greater,
+    GreaterGreater,
+    Less,
+    LessLess,
     // Special
     Err(SyntaxError),
     Eof,
@@ -38,12 +44,18 @@ impl TokenTy {
     /// Returns none if not binary operator
     pub fn binary_prec(self) -> Option<(usize, BinaryOp)> {
         use TokenTy::*;
+        const PRODUCT: usize = 50;
+        const TERM: usize = 45;
+        const SHIFT: usize = 40;
+
         match self {
-            Star => Some((50, BinaryOp::Mul)),
-            Slash => Some((50, BinaryOp::Div)),
-            Percent => Some((50, BinaryOp::Rem)),
-            Plus => Some((45, BinaryOp::Add)),
-            Minus => Some((45, BinaryOp::Sub)),
+            Star => Some((PRODUCT, BinaryOp::Mul)),
+            Slash => Some((PRODUCT, BinaryOp::Div)),
+            Percent => Some((PRODUCT, BinaryOp::Rem)),
+            Plus => Some((TERM, BinaryOp::Add)),
+            Minus => Some((TERM, BinaryOp::Sub)),
+            GreaterGreater => Some((SHIFT, BinaryOp::Shr)),
+            LessLess => Some((SHIFT, BinaryOp::Shl)),
             _ => None,
         }
     }

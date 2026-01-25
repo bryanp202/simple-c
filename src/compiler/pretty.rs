@@ -22,11 +22,13 @@ impl<A: Allocator> Display for ast::Program<'_, A> {
 impl Display for ast::BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let c = match self {
-            Self::Add => '+',
-            Self::Div => '/',
-            Self::Mul => '*',
-            Self::Rem => '%',
-            Self::Sub => '-',
+            Self::Add => "+",
+            Self::Div => "/",
+            Self::Mul => "*",
+            Self::Rem => "%",
+            Self::Sub => "-",
+            Self::Shl => "<<",
+            Self::Shr => ">>",
         };
         write!(f, "{c}")
     }
