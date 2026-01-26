@@ -29,9 +29,17 @@ impl Display for ast::BinaryOp {
             Self::Sub => "-",
             Self::Shl => "<<",
             Self::Shr => ">>",
+            Self::G => ">",
+            Self::GE => ">=",
+            Self::L => "<",
+            Self::LE => "<=",
+            Self::E => "==",
+            Self::NE => "!=",
             Self::BitAnd => "&",
             Self::BitOr => "|",
             Self::BitXor => "^",
+            Self::And => "&&",
+            Self::Or => "||",
         };
         write!(f, "{c}")
     }
@@ -40,8 +48,9 @@ impl Display for ast::BinaryOp {
 impl Display for ast::UnaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let c = match self {
-            Self::Compliment => '~',
-            Self::Negate => '-',
+            Self::Compliment => "~",
+            Self::Negate => "-",
+            Self::Not => "!",
         };
         write!(f, "{c}")
     }

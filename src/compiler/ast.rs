@@ -1,6 +1,9 @@
 use std::alloc::{Allocator, Global};
 
-use crate::{compiler::tacky, intern::Interned};
+use crate::{
+    compiler::{asm::Label, tacky},
+    intern::Interned,
+};
 
 pub struct Program<'src, A: Allocator = Global> {
     pub(crate) item: Item<'src, A>,
@@ -28,24 +31,34 @@ pub enum Expr<A: Allocator> {
 pub enum UnaryOp {
     Compliment,
     Negate,
+    Not,
 }
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum BinaryOp {
-    Add,
-    Sub,
     Div,
     Mul,
     Rem,
+    Add,
+    Sub,
+    L,
+    LE,
+    G,
+    GE,
+    E,
+    NE,
     Shl,
     Shr,
     BitAnd,
     BitXor,
     BitOr,
+    And,
+    Or,
 }
 
 pub struct TackyConverter {
     temp_count: usize,
+    label_count: usize,
 }
 
 impl Default for TackyConverter {
@@ -56,7 +69,10 @@ impl Default for TackyConverter {
 
 impl TackyConverter {
     pub fn new() -> Self {
-        Self { temp_count: 0 }
+        Self {
+            temp_count: 0,
+            label_count: 0,
+        }
     }
 
     pub fn convert<'src, A: Allocator>(
@@ -73,6 +89,12 @@ impl<'src> TackyConverter {
         let temp = self.temp_count;
         self.temp_count += 1;
         tacky::Val::Temp(temp)
+    }
+
+    fn new_label(&mut self) -> Label {
+        let label = self.label_count;
+        self.label_count += 1;
+        Label(label)
     }
 
     fn item(&mut self, item: Item<'src, impl Allocator>) -> tacky::Item<'src> {
@@ -113,23 +135,95 @@ impl<'src> TackyConverter {
         rhs: Expr<A>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
-        let op = match ast_op {
-            BinaryOp::Add => tacky::BinaryOp::Add,
-            BinaryOp::Div => tacky::BinaryOp::Div,
-            BinaryOp::Mul => tacky::BinaryOp::Mul,
-            BinaryOp::Rem => tacky::BinaryOp::Rem,
-            BinaryOp::Sub => tacky::BinaryOp::Sub,
-            BinaryOp::Shl => tacky::BinaryOp::Shl,
-            BinaryOp::Shr => tacky::BinaryOp::Sar,
-            BinaryOp::BitAnd => tacky::BinaryOp::BitAnd,
-            BinaryOp::BitOr => tacky::BinaryOp::BitOr,
-            BinaryOp::BitXor => tacky::BinaryOp::BitXor,
-        };
-        let lhs = self.expr(lhs, insts);
-        let rhs = self.expr(rhs, insts);
-        let dst = self.new_temp();
-        insts.push(tacky::Inst::Binary { op, lhs, rhs, dst });
-        dst
+        match ast_op {
+            BinaryOp::And => {
+                let lhs = self.expr(lhs, insts);
+                let false_label = self.new_label();
+                insts.push(tacky::Inst::JumpIfZero(lhs, false_label));
+                // If !lhs, jump to false_label
+
+                let rhs = self.expr(rhs, insts);
+                insts.push(tacky::Inst::JumpIfZero(rhs, false_label));
+                // If !rhs, jump to false_label
+
+                let dst = self.new_temp();
+                insts.push(tacky::Inst::Copy {
+                    src: tacky::Val::Const(1),
+                    dst,
+                });
+                let end_label = self.new_label();
+                insts.push(tacky::Inst::Jump(end_label));
+                // Jump to end
+
+                // false_label:
+                insts.push(tacky::Inst::Label(false_label));
+                insts.push(tacky::Inst::Copy {
+                    src: tacky::Val::Const(0),
+                    dst,
+                });
+                insts.push(tacky::Inst::Label(end_label));
+                // end:
+
+                dst
+            }
+            BinaryOp::Or => {
+                let lhs = self.expr(lhs, insts);
+                let true_label = self.new_label();
+                insts.push(tacky::Inst::JumpIfNotZero(lhs, true_label));
+                // If lhs, jump to true_label
+
+                let rhs = self.expr(rhs, insts);
+                insts.push(tacky::Inst::JumpIfNotZero(rhs, true_label));
+                // If rhs, jump to true_label
+
+                let dst = self.new_temp();
+                insts.push(tacky::Inst::Copy {
+                    src: tacky::Val::Const(0),
+                    dst,
+                });
+                let end_label = self.new_label();
+                insts.push(tacky::Inst::Jump(end_label));
+                // Jump to end
+
+                // true_label:
+                insts.push(tacky::Inst::Label(true_label));
+                insts.push(tacky::Inst::Copy {
+                    src: tacky::Val::Const(1),
+                    dst,
+                });
+                insts.push(tacky::Inst::Label(end_label));
+                // end:
+
+                dst
+            }
+            _ => {
+                let op = match ast_op {
+                    BinaryOp::Div => tacky::BinaryOp::Div,
+                    BinaryOp::Mul => tacky::BinaryOp::Mul,
+                    BinaryOp::Rem => tacky::BinaryOp::Rem,
+                    BinaryOp::Add => tacky::BinaryOp::Add,
+                    BinaryOp::Sub => tacky::BinaryOp::Sub,
+                    BinaryOp::G => tacky::BinaryOp::G,
+                    BinaryOp::GE => tacky::BinaryOp::GE,
+                    BinaryOp::L => tacky::BinaryOp::L,
+                    BinaryOp::LE => tacky::BinaryOp::LE,
+                    BinaryOp::E => tacky::BinaryOp::E,
+                    BinaryOp::NE => tacky::BinaryOp::NE,
+                    BinaryOp::Shl => tacky::BinaryOp::Shl,
+                    BinaryOp::Shr => tacky::BinaryOp::Sar,
+                    BinaryOp::BitAnd => tacky::BinaryOp::BitAnd,
+                    BinaryOp::BitOr => tacky::BinaryOp::BitOr,
+                    BinaryOp::BitXor => tacky::BinaryOp::BitXor,
+                    _ => unreachable!(),
+                };
+                let lhs = self.expr(lhs, insts);
+                let rhs = self.expr(rhs, insts);
+                let dst = self.new_temp();
+
+                insts.push(tacky::Inst::Binary { op, lhs, rhs, dst });
+                dst
+            }
+        }
     }
 
     fn unary(
@@ -141,6 +235,7 @@ impl<'src> TackyConverter {
         let op = match ast_op {
             UnaryOp::Compliment => tacky::UnaryOp::Compliment,
             UnaryOp::Negate => tacky::UnaryOp::Negate,
+            UnaryOp::Not => tacky::UnaryOp::Not,
         };
         let src = self.expr(expr, insts);
         let dst = self.new_temp();

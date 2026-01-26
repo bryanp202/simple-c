@@ -24,14 +24,24 @@ pub enum Item<'src> {
 pub enum Inst {
     Unary(UnaryOp, Operand),
     Binary(BinaryOp, Operand, Operand),
+    // Control flow
+    Label(Label),
+    Jump(Label),
+    JumpCC(CompareOp, Label),
     // Other
+    Cmp(Operand, Operand),
+    SetCC(CompareOp, Operand),
     Cdq,
     Mov(Operand, Operand),
+    // Special
     IDiv(Operand),
     // Function
     AllocateStack(usize),
     Ret,
 }
+
+#[derive(Clone, Copy)]
+pub struct Label(pub(crate) usize);
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Operand {
@@ -57,6 +67,16 @@ pub enum BinaryOp {
     And,
     Or,
     Xor,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum CompareOp {
+    E,
+    NE,
+    L,
+    LE,
+    G,
+    GE,
 }
 
 pub struct OneByteOperand<'o>(&'o Operand);
@@ -137,6 +157,17 @@ impl Display for Inst {
             Self::Binary(op, src, dst) => {
                 write!(f, "{op} {}, {}", src.display_d(), dst.display_d())
             }
+            // Control flow
+            Self::Label(label) => write!(f, "{label}:"),
+            Self::Jump(label) => write!(f, "jmp {label}"),
+            Self::JumpCC(cc, label) => write!(f, "j{cc} {label}"),
+            // Special
+            Self::IDiv(operand) => write!(f, "idivl {}", operand.display_d()),
+            // Other
+            Self::Cmp(a, b) => write!(f, "cmpl {}, {}", a.display_d(), b.display_d()),
+            Self::SetCC(cc, dst) => write!(f, "set{cc} {}", dst.display_b()),
+            Self::Cdq => write!(f, "cdq"),
+            Self::Mov(src, dst) => write!(f, "movl {}, {}", src.display_d(), dst.display_d()),
             // Function
             Self::AllocateStack(amt) => write!(f, "subq ${amt}, %rsp"),
             Self::Ret => {
@@ -144,12 +175,13 @@ impl Display for Inst {
                 writeln!(f, "    popq %rbp")?;
                 write!(f, "    ret")
             }
-            // Special
-            Self::IDiv(operand) => write!(f, "idivl {}", operand.display_d()),
-            // Other
-            Self::Cdq => write!(f, "cdq"),
-            Self::Mov(src, dst) => write!(f, "movl {}, {}", src.display_d(), dst.display_d()),
         }
+    }
+}
+
+impl Display for Label {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, ".L{}", self.0)
     }
 }
 
@@ -176,6 +208,20 @@ impl Display for BinaryOp {
             Self::And => "andl",
             Self::Or => "orl",
             Self::Xor => "xorl",
+        };
+        write!(f, "{op}")
+    }
+}
+
+impl Display for CompareOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Self::E => "e",
+            Self::NE => "ne",
+            Self::G => "g",
+            Self::GE => "ge",
+            Self::L => "l",
+            Self::LE => "le",
         };
         write!(f, "{op}")
     }

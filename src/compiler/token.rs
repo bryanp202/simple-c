@@ -29,13 +29,19 @@ pub enum TokenTy {
     Star,
     Equal,
     EqualEqual,
+    Bang,
+    BangEqual,
     Greater,
+    GreaterEqual,
     GreaterGreater,
     Less,
+    LessEqual,
     LessLess,
     Ampersand,
+    AmpersandAmpersand,
     Caret,
     Pipe,
+    PipePipe,
     // Special
     Err(SyntaxError),
     Eof,
@@ -50,21 +56,41 @@ impl TokenTy {
         const PRODUCT: usize = 50;
         const TERM: usize = 45;
         const SHIFT: usize = 40;
-        const BIT_AND: usize = 35;
-        const BIT_XOR: usize = 30;
-        const BIT_OR: usize = 25;
+        const RELATIONAL: usize = 35;
+        const EQUALITY: usize = 30;
+        const BIT_AND: usize = 25;
+        const BIT_XOR: usize = 20;
+        const BIT_OR: usize = 15;
+        const LOGIC_AND: usize = 10;
+        const LOGIC_OR: usize = 5;
 
         match self {
+            // * / %
             Star => Some((PRODUCT, BinaryOp::Mul)),
             Slash => Some((PRODUCT, BinaryOp::Div)),
             Percent => Some((PRODUCT, BinaryOp::Rem)),
+            // + -
             Plus => Some((TERM, BinaryOp::Add)),
             Minus => Some((TERM, BinaryOp::Sub)),
+            // >> <<
             GreaterGreater => Some((SHIFT, BinaryOp::Shr)),
             LessLess => Some((SHIFT, BinaryOp::Shl)),
+            // > >= < <=
+            Greater => Some((RELATIONAL, BinaryOp::G)),
+            GreaterEqual => Some((RELATIONAL, BinaryOp::GE)),
+            Less => Some((RELATIONAL, BinaryOp::L)),
+            LessEqual => Some((RELATIONAL, BinaryOp::LE)),
+            // == !=
+            EqualEqual => Some((EQUALITY, BinaryOp::E)),
+            BangEqual => Some((EQUALITY, BinaryOp::NE)),
+            // & ^ |
             Ampersand => Some((BIT_AND, BinaryOp::BitAnd)),
             Caret => Some((BIT_XOR, BinaryOp::BitXor)),
             Pipe => Some((BIT_OR, BinaryOp::BitOr)),
+            // &&
+            AmpersandAmpersand => Some((LOGIC_AND, BinaryOp::And)),
+            // ||
+            PipePipe => Some((LOGIC_OR, BinaryOp::Or)),
             _ => None,
         }
     }

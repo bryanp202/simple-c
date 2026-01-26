@@ -192,13 +192,14 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     fn unary(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        const UNARY_OPS: [TokenTy; 2] = [TokenTy::Minus, TokenTy::Tilde];
+        const UNARY_OPS: [TokenTy; 3] = [TokenTy::Minus, TokenTy::Tilde, TokenTy::Bang];
 
         if self.check_any(UNARY_OPS) {
             self.advance_unchecked();
             let op = match self.prev.ty {
                 TokenTy::Minus => UnaryOp::Negate,
                 TokenTy::Tilde => UnaryOp::Compliment,
+                TokenTy::Bang => UnaryOp::Not,
                 _ => unreachable!(),
             };
             let operand = self.unary()?;

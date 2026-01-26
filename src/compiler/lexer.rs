@@ -48,15 +48,21 @@ impl<'src> Lexer<'src> {
             '/' => TokenTy::Slash,
             '%' => TokenTy::Percent,
             // Compare/Shift
-            '=' if self.eat_if('=') => TokenTy::EqualEqual,
-            '=' => TokenTy::Equal,
             '>' if self.eat_if('>') => TokenTy::GreaterGreater,
+            '>' if self.eat_if('=') => TokenTy::GreaterEqual,
             '>' => TokenTy::Greater,
             '<' if self.eat_if('<') => TokenTy::LessLess,
+            '<' if self.eat_if('<') => TokenTy::LessEqual,
             '<' => TokenTy::Less,
+            '=' if self.eat_if('=') => TokenTy::EqualEqual,
+            '=' => TokenTy::Equal,
+            '!' if self.eat_if('=') => TokenTy::BangEqual,
+            '!' => TokenTy::Bang,
             // Bitwise
+            '&' if self.eat_if('&') => TokenTy::AmpersandAmpersand,
             '&' => TokenTy::Ampersand,
             '^' => TokenTy::Caret,
+            '|' if self.eat_if('|') => TokenTy::PipePipe,
             '|' => TokenTy::Pipe,
 
             // Special

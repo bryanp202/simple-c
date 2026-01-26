@@ -1,5 +1,5 @@
 use crate::{
-    compiler::asm::{self, Operand, Reg},
+    compiler::asm::{self, CompareOp, Label, Operand, Reg},
     intern::Interned,
 };
 
@@ -16,6 +16,10 @@ pub enum Item<'src> {
 
 pub enum Inst<'src> {
     Ret(Val<'src>),
+    Copy {
+        src: Val<'src>,
+        dst: Val<'src>,
+    },
     Unary {
         op: UnaryOp,
         src: Val<'src>,
@@ -27,6 +31,10 @@ pub enum Inst<'src> {
         rhs: Val<'src>,
         dst: Val<'src>,
     },
+    Jump(Label),
+    JumpIfZero(Val<'src>, Label),
+    JumpIfNotZero(Val<'src>, Label),
+    Label(Label),
 }
 
 #[derive(Clone, Copy)]
@@ -39,20 +47,27 @@ pub enum Val<'src> {
 pub enum UnaryOp {
     Compliment,
     Negate,
+    Not,
 }
 
 #[derive(Debug)]
 pub enum BinaryOp {
-    Add,
-    Sub,
     Div,
     Mul,
     Rem,
+    Add,
+    Sub,
+    L,
+    LE,
+    G,
+    GE,
+    E,
+    NE,
     Shl,
     Sar,
     BitAnd,
-    BitOr,
     BitXor,
+    BitOr,
 }
 
 pub struct AsmConverter {
@@ -122,11 +137,24 @@ impl<'src> AsmConverter {
         let last_inst = match inst {
             Inst::Binary { op, lhs, rhs, dst } => self.convert_binary(op, lhs, rhs, dst, asm_insts),
             Inst::Unary { op, src, dst } => self.convert_unary(op, src, dst, asm_insts),
+            // Control flow
+            Inst::Label(label) => asm::Inst::Label(label),
+            Inst::Jump(label) => asm::Inst::Jump(label),
+            Inst::JumpIfZero(src, label) => {
+                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), self.convert_val(src)));
+                asm::Inst::JumpCC(CompareOp::E, label)
+            }
+            Inst::JumpIfNotZero(src, label) => {
+                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), self.convert_val(src)));
+                asm::Inst::JumpCC(CompareOp::NE, label)
+            }
             Inst::Ret(src) => {
                 let src = self.convert_val(src);
                 asm_insts.push(asm::Inst::Mov(src, asm::Operand::Reg(Reg::AX)));
                 asm::Inst::Ret
             }
+            // Other
+            Inst::Copy { src, dst } => asm::Inst::Mov(self.convert_val(src), self.convert_val(dst)),
         };
 
         asm_insts.push(last_inst);
@@ -145,18 +173,7 @@ impl<'src> AsmConverter {
         let dst = self.convert_val(dst);
 
         match op {
-            BinaryOp::Div | BinaryOp::Rem => {
-                asm_insts.push(asm::Inst::Mov(lhs, Operand::Reg(Reg::AX)));
-                asm_insts.push(asm::Inst::Cdq);
-                asm_insts.push(asm::Inst::IDiv(rhs));
-
-                let reg = match op {
-                    BinaryOp::Div => Reg::AX,
-                    BinaryOp::Rem => Reg::DX,
-                    _ => unreachable!(),
-                };
-                asm::Inst::Mov(Operand::Reg(reg), dst)
-            }
+            // Regular binary ops
             BinaryOp::Add
             | BinaryOp::Mul
             | BinaryOp::Sub
@@ -179,6 +196,41 @@ impl<'src> AsmConverter {
                 };
                 asm::Inst::Binary(asm_op, rhs, dst)
             }
+
+            // Special register req binary ops
+            BinaryOp::Div | BinaryOp::Rem => {
+                asm_insts.push(asm::Inst::Mov(lhs, Operand::Reg(Reg::AX)));
+                asm_insts.push(asm::Inst::Cdq);
+                asm_insts.push(asm::Inst::IDiv(rhs));
+
+                let reg = match op {
+                    BinaryOp::Div => Reg::AX,
+                    BinaryOp::Rem => Reg::DX,
+                    _ => unreachable!(),
+                };
+                asm::Inst::Mov(Operand::Reg(reg), dst)
+            }
+
+            // Compare binary ops
+            BinaryOp::E
+            | BinaryOp::NE
+            | BinaryOp::G
+            | BinaryOp::GE
+            | BinaryOp::L
+            | BinaryOp::LE => {
+                let compare_op = match op {
+                    BinaryOp::E => CompareOp::E,
+                    BinaryOp::NE => CompareOp::NE,
+                    BinaryOp::G => CompareOp::G,
+                    BinaryOp::GE => CompareOp::GE,
+                    BinaryOp::L => CompareOp::L,
+                    BinaryOp::LE => CompareOp::LE,
+                    _ => unreachable!(),
+                };
+                asm_insts.push(asm::Inst::Cmp(lhs, rhs));
+                asm_insts.push(asm::Inst::Mov(Operand::Imm(0), dst));
+                asm::Inst::SetCC(compare_op, dst)
+            }
         }
     }
 
@@ -191,14 +243,23 @@ impl<'src> AsmConverter {
     ) -> asm::Inst {
         let src = self.convert_val(src);
         let dst = self.convert_val(dst);
-        asm_insts.push(asm::Inst::Mov(src, dst));
 
-        let asm_op = match op {
-            UnaryOp::Compliment => asm::UnaryOp::Not,
-            UnaryOp::Negate => asm::UnaryOp::Neg,
-        };
-
-        asm::Inst::Unary(asm_op, dst)
+        match op {
+            UnaryOp::Not => {
+                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), src));
+                asm_insts.push(asm::Inst::Mov(Operand::Imm(0), dst));
+                asm::Inst::SetCC(CompareOp::E, dst)
+            }
+            UnaryOp::Compliment | UnaryOp::Negate => {
+                asm_insts.push(asm::Inst::Mov(src, dst));
+                let asm_op = match op {
+                    UnaryOp::Compliment => asm::UnaryOp::Not,
+                    UnaryOp::Negate => asm::UnaryOp::Neg,
+                    _ => unreachable!(),
+                };
+                asm::Inst::Unary(asm_op, dst)
+            }
+        }
     }
 
     fn convert_val(&mut self, val: Val) -> asm::Operand {
@@ -243,7 +304,15 @@ impl<'src> AsmConverter {
             asm::Inst::Mov(src, dst) => {
                 asm::Inst::Mov(self.fill_operand(src), self.fill_operand(dst))
             }
-            asm::Inst::AllocateStack(_) | asm::Inst::Cdq | asm::Inst::Ret => inst,
+            asm::Inst::Cmp(a, b) => asm::Inst::Cmp(self.fill_operand(a), self.fill_operand(b)),
+            asm::Inst::SetCC(op, dst) => asm::Inst::SetCC(op, self.fill_operand(dst)),
+            // No changes needed
+            asm::Inst::AllocateStack(_)
+            | asm::Inst::Cdq
+            | asm::Inst::Jump(_)
+            | asm::Inst::Label(_)
+            | asm::Inst::JumpCC(..)
+            | asm::Inst::Ret => inst,
         }
     }
 
@@ -293,18 +362,32 @@ impl<'src> AsmConverter {
             }
 
             //  Prevent mem to mem move
-            asm::Inst::Mov(src, dst)
-                if matches!(src, Operand::Stack(_)) && matches!(dst, Operand::Stack(_)) =>
-            {
+            asm::Inst::Mov(src, dst) if is_mem_to_mem(&src, &dst) => {
                 fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::R10)));
                 asm::Inst::Mov(Operand::Reg(Reg::R10), dst)
             }
 
+            // Prevent mem to mem cmp
+            asm::Inst::Cmp(a, b) if is_mem_to_mem(&a, &b) => {
+                fixed_insts.push(asm::Inst::Mov(a, Operand::Reg(Reg::R10)));
+                asm::Inst::Cmp(Operand::Reg(Reg::R10), b)
+            }
+            // Prevent rhs constant cmp
+            asm::Inst::Cmp(a, b) if matches!(b, Operand::Imm(_)) => {
+                fixed_insts.push(asm::Inst::Mov(b, Operand::Reg(Reg::R11)));
+                asm::Inst::Cmp(a, Operand::Reg(Reg::R11))
+            }
+
             asm::Inst::AllocateStack(_)
             | asm::Inst::Cdq
+            | asm::Inst::Cmp(..)
             | asm::Inst::Mov(..)
             | asm::Inst::Unary(..)
-            | asm::Inst::Ret => inst,
+            | asm::Inst::Ret
+            | asm::Inst::Jump(_)
+            | asm::Inst::JumpCC(..)
+            | asm::Inst::Label(_)
+            | asm::Inst::SetCC(..) => inst,
         };
         fixed_insts.push(last_inst);
     }
@@ -323,7 +406,7 @@ impl<'src> AsmConverter {
             | asm::BinaryOp::And
             | asm::BinaryOp::Or
             | asm::BinaryOp::Xor
-                if matches!(src, Operand::Stack(_)) && matches!(dst, Operand::Stack(_)) =>
+                if is_mem_to_mem(&src, &dst) =>
             {
                 fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::R10)));
                 asm::Inst::Binary(op, Operand::Reg(Reg::R10), dst)
@@ -356,4 +439,8 @@ impl<'src> AsmConverter {
             | asm::BinaryOp::Xor => asm::Inst::Binary(op, src, dst),
         }
     }
+}
+
+fn is_mem_to_mem(a: &Operand, b: &Operand) -> bool {
+    matches!(a, Operand::Stack(_)) && matches!(b, Operand::Stack(_))
 }
