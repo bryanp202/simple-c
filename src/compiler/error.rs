@@ -104,8 +104,9 @@ impl CompileError {
 #[derive(Debug)]
 pub struct CachedError<E: Display> {
     line_ids: Range<usize>,
-    start_col: usize,
-    end_col: usize,
+    col: usize,
+    start_width: usize,
+    end_width: usize,
     err: E,
 }
 
@@ -210,17 +211,19 @@ impl<E: Display> ErrorCache<E> {
 
         // Ensures no panic if an empty src is inputted
         let sub_line_ranges = &line_ranges[start_line..end_line];
-        let start_col = src
-            [sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.0.start as usize]
-            .width();
-        let end_col = src
+        let start_line = &src
+            [sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.0.start as usize];
+        let col = start_line.chars().count() + 1;
+        let start_width = start_line.width();
+        let end_width = src
             [sub_line_ranges.last().map_or(0, |range| range.start)..err.ctx.0.end as usize]
             .width();
 
         CachedError::<E> {
             line_ids,
-            start_col,
-            end_col,
+            col,
+            start_width,
+            end_width,
             err: err.err,
         }
     }
@@ -245,8 +248,9 @@ impl<E: Display> ErrorCache<E> {
     fn display(&self, f: &mut std::fmt::Formatter<'_>, src_path: &Path) -> std::fmt::Result {
         for CachedError {
             line_ids,
-            start_col,
-            end_col,
+            col,
+            start_width,
+            end_width,
             err,
         } in &self.errors
         {
@@ -254,9 +258,8 @@ impl<E: Display> ErrorCache<E> {
             let (line_num_width, start_line) = self.get_start_info(line_ids);
             writeln!(
                 f,
-                "  \x1b[1m\x1b[36m-->\x1b[0m {}:{start_line}:{}",
+                "  \x1b[1m\x1b[36m-->\x1b[0m {}:{start_line}:{col}",
                 src_path.display(),
-                start_col + 1,
             )?;
             // For errors from empty src files
             if line_ids.is_empty() {
@@ -264,7 +267,7 @@ impl<E: Display> ErrorCache<E> {
             }
 
             // Write any remaining lines without ^ at the start
-            let mut start_col = *start_col;
+            let mut start_width = *start_width;
             let mut skipped = false;
             for line_id in line_ids.clone() {
                 let (line_num, line_width, line) = self.lookup(line_id);
@@ -278,8 +281,8 @@ impl<E: Display> ErrorCache<E> {
                 skipped = false;
 
                 let line_char_count = match line_id + 1 == line_ids.end {
-                    true => *end_col - start_col,
-                    false => line_width - start_col,
+                    true => *end_width - start_width,
+                    false => line_width - start_width,
                 };
                 writeln!(
                     f,
@@ -289,10 +292,10 @@ impl<E: Display> ErrorCache<E> {
                 // Do with stuff to draw squiggles under
                 writeln!(
                     f,
-                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {:>start_col$}\x1b[1m\x1b[31m{:~>line_char_count$}\x1b[0m",
+                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {:>start_width$}\x1b[1m\x1b[31m{:~>line_char_count$}\x1b[0m",
                     "", "", ""
                 )?;
-                start_col = 0;
+                start_width = 0;
             }
             writeln!(f)?;
         }

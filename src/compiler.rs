@@ -141,13 +141,24 @@ fn generate_unit(
     let mut id_interner = Interner::new();
     let ast_arena = Arena::new();
 
+    // Parse into an ast
     let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path.clone())?;
     if compile_flags.show_pretty_ast {
-        println!("{}: {ast_tree}", src_path.display());
+        eprintln!("{}: {ast_tree}", src_path.display());
     }
 
+    // Convert into a three address code IR
     let tacky_program = TackyConverter::new().convert(ast_tree);
+    if compile_flags.show_pretty_tacky {
+        eprintln!("{}: {tacky_program}", src_path.display());
+    }
+
+    // Convert into x86_64 asm IR
     let asm_program = AsmConverter::new().convert(tacky_program);
+    if compile_flags.show_pretty_asm {
+        eprintln!("{}:", src_path.display());
+        eprintln!("{asm_program}");
+    }
 
     asm_program
         .generate(&asm_path)
