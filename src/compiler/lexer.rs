@@ -52,7 +52,7 @@ impl<'src> Lexer<'src> {
             '>' if self.eat_if('=') => TokenTy::GreaterEqual,
             '>' => TokenTy::Greater,
             '<' if self.eat_if('<') => TokenTy::LessLess,
-            '<' if self.eat_if('<') => TokenTy::LessEqual,
+            '<' if self.eat_if('=') => TokenTy::LessEqual,
             '<' => TokenTy::Less,
             '=' if self.eat_if('=') => TokenTy::EqualEqual,
             '=' => TokenTy::Equal,
