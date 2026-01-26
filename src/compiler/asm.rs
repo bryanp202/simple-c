@@ -22,27 +22,15 @@ pub enum Item<'src> {
 ///
 /// All binary inst are stored as (src, dst), similar to AT&T syntax
 pub enum Inst {
-    // Function
-    AllocateStack(usize),
-    Ret,
-    // Arith
-    Add(Operand, Operand),
-    Sub(Operand, Operand),
-    IMul(Operand, Operand),
-    // Shift
-    Shl(Operand, Operand),
-    Sar(Operand, Operand),
-    // Bitwise
-    And(Operand, Operand),
-    Or(Operand, Operand),
-    Xor(Operand, Operand),
-    // Unary
-    IDiv(Operand),
-    Neg(Operand),
-    Not(Operand),
+    Unary(UnaryOp, Operand),
+    Binary(BinaryOp, Operand, Operand),
     // Other
     Cdq,
     Mov(Operand, Operand),
+    IDiv(Operand),
+    // Function
+    AllocateStack(usize),
+    Ret,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -51,6 +39,24 @@ pub enum Operand {
     Reg(Reg),
     Psuedo(usize),
     Stack(usize),
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    IMul,
+    Shl,
+    Sar,
+    And,
+    Or,
+    Xor,
 }
 
 pub struct OneByteOperand<'o>(&'o Operand);
@@ -124,6 +130,13 @@ impl Display for Inst {
     // Last instruction should be write!(...)
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Unary(op, dst) => write!(f, "{op} {}", dst.display_d()),
+            Self::Binary(op, src, dst) if matches!(op, BinaryOp::Sar | BinaryOp::Shl) => {
+                write!(f, "{op} {}, {}", src.display_b(), dst.display_d())
+            }
+            Self::Binary(op, src, dst) => {
+                write!(f, "{op} {}, {}", src.display_d(), dst.display_d())
+            }
             // Function
             Self::AllocateStack(amt) => write!(f, "subq ${amt}, %rsp"),
             Self::Ret => {
@@ -131,25 +144,40 @@ impl Display for Inst {
                 writeln!(f, "    popq %rbp")?;
                 write!(f, "    ret")
             }
-            // Arith
-            Self::Add(src, dst) => write!(f, "addl {}, {}", src.display_d(), dst.display_d()),
-            Self::Sub(src, dst) => write!(f, "subl {}, {}", src.display_d(), dst.display_d()),
-            Self::IMul(src, dst) => write!(f, "imull {}, {}", src.display_d(), dst.display_d()),
-            // Shift
-            Self::Shl(src, dst) => write!(f, "shl {}, {}", src.display_b(), dst.display_d()),
-            Self::Sar(src, dst) => write!(f, "sar {}, {}", src.display_b(), dst.display_d()),
-            // Bitwise
-            Self::And(src, dst) => write!(f, "and {}, {}", src.display_d(), dst.display_d()),
-            Self::Or(src, dst) => write!(f, "or {}, {}", src.display_d(), dst.display_d()),
-            Self::Xor(src, dst) => write!(f, "xor {}, {}", src.display_d(), dst.display_d()),
             // Special
             Self::IDiv(operand) => write!(f, "idivl {}", operand.display_d()),
-            Self::Neg(dst) => write!(f, "negl {}", dst.display_d()),
-            Self::Not(dst) => write!(f, "notl {}", dst.display_d()),
             // Other
             Self::Cdq => write!(f, "cdq"),
             Self::Mov(src, dst) => write!(f, "movl {}, {}", src.display_d(), dst.display_d()),
         }
+    }
+}
+
+impl Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Self::Neg => "negl",
+            Self::Not => "notl",
+        };
+        write!(f, "{op}")
+    }
+}
+
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Self::Add => "addl",
+            Self::Sub => "subl",
+            Self::IMul => "imull",
+            // Shift
+            Self::Shl => "shl",
+            Self::Sar => "sar",
+            // Bitwise
+            Self::And => "andl",
+            Self::Or => "orl",
+            Self::Xor => "xorl",
+        };
+        write!(f, "{op}")
     }
 }
 
