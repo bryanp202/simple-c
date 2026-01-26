@@ -1,3 +1,3 @@
 int main() {
-    return 0 || !0;
+    return 2 != 2 || !(2 != 2);
 }

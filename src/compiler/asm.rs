@@ -137,7 +137,7 @@ impl<'src> Display for Item<'src> {
                 writeln!(f, "    pushq %rbp")?;
                 writeln!(f, "    movq %rsp, %rbp")?;
                 for inst in insts {
-                    writeln!(f, "    {inst}")?;
+                    writeln!(f, "{inst}")?;
                 }
                 Ok(())
             }
@@ -149,6 +149,10 @@ impl Display for Inst {
     // All instructions after the first must have "    " (four spaces)
     // Last instruction should be write!(...)
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !matches!(self, Self::Label(_)) {
+            write!(f, "    ")?;
+        }
+
         match self {
             Self::Unary(op, dst) => write!(f, "{op} {}", dst.display_d()),
             Self::Binary(op, src, dst) if matches!(op, BinaryOp::Sar | BinaryOp::Shl) => {
