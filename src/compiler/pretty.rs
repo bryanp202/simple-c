@@ -193,8 +193,8 @@ impl PrettyPrint for tacky::Inst<'_> {
             }
             Self::Copy { src, dst } => write!(f, "{dst} <- {src}"),
             Self::Jump(label) => write!(f, "jmp {label}"),
-            Self::JumpIfNotZero(src, label) => write!(f, "jmp {label} if {src} != 0"),
-            Self::JumpIfZero(src, label) => write!(f, "jmp {label} if {src} == 0"),
+            Self::JumpIfNotZero(src, label) => write!(f, "jnz {src} {label}"),
+            Self::JumpIfZero(src, label) => write!(f, "jz {src} {label}"),
             Self::Label(label) => write!(f, "{label}"),
             Self::Ret(src) => write!(f, "ret {src}"),
             Self::Unary { op, src, dst } => write!(f, "{dst} <- {op}({src})"),
