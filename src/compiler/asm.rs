@@ -115,20 +115,20 @@ pub enum Reg {
     R11,
 }
 
-impl<'src> Program<'src> {
+impl Program<'_> {
     pub fn generate(&self, path: &Path) -> io::Result<()> {
         let mut buf = BufWriter::new(File::create(path)?);
-        write!(buf, "{}", self)
+        write!(buf, "{self}")
     }
 }
 
-impl<'src> Display for Program<'src> {
+impl Display for Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.item)
     }
 }
 
-impl<'src> Display for Item<'src> {
+impl Display for Item<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Fn { name, insts } => {
@@ -237,7 +237,7 @@ impl Display for OneByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_one_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            _ => unreachable!(),
+            Operand::Psuedo(_) => unreachable!(),
         }
     }
 }
@@ -248,7 +248,7 @@ impl Display for TwoByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_two_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            _ => unreachable!(),
+            Operand::Psuedo(_) => unreachable!(),
         }
     }
 }
@@ -259,7 +259,7 @@ impl Display for FourByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_four_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            _ => unreachable!(),
+            Operand::Psuedo(_) => unreachable!(),
         }
     }
 }
@@ -270,13 +270,13 @@ impl Display for EightByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_eight_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            _ => unreachable!(),
+            Operand::Psuedo(_) => unreachable!(),
         }
     }
 }
 
 impl Reg {
-    fn as_one_byte(&self) -> &'static str {
+    fn as_one_byte(self) -> &'static str {
         match self {
             Self::AX => "al",
             Self::CX => "cl",
@@ -286,7 +286,7 @@ impl Reg {
         }
     }
 
-    fn as_two_byte(&self) -> &'static str {
+    fn as_two_byte(self) -> &'static str {
         match self {
             Self::AX => "ax",
             Self::CX => "cx",
@@ -296,7 +296,7 @@ impl Reg {
         }
     }
 
-    fn as_four_byte(&self) -> &'static str {
+    fn as_four_byte(self) -> &'static str {
         match self {
             Self::AX => "eax",
             Self::CX => "ecx",
@@ -306,7 +306,7 @@ impl Reg {
         }
     }
 
-    fn as_eight_byte(&self) -> &'static str {
+    fn as_eight_byte(self) -> &'static str {
         match self {
             Self::AX => "rax",
             Self::CX => "rcx",

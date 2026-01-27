@@ -39,13 +39,13 @@ pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
     }
 
     if compile_errors.is_empty() {
-        assemble(args, asm_files)
+        assemble(args, &asm_files)
     } else {
         Err(BuildError::CompileErrors(compile_errors))
     }
 }
 
-fn assemble(args: CompileArgs, asm_files: Vec<OsString>) -> Result<(), BuildError> {
+fn assemble(args: CompileArgs, asm_files: &[OsString]) -> Result<(), BuildError> {
     let mut output_path = args.output.unwrap_or_else(|| PathBuf::from("out"));
     output_path.set_extension("exe");
 
@@ -53,7 +53,7 @@ fn assemble(args: CompileArgs, asm_files: Vec<OsString>) -> Result<(), BuildErro
         .args(
             asm_files
                 .iter()
-                .map(|file| file.as_os_str())
+                .map(std::ffi::OsString::as_os_str)
                 .chain([&OsStr::from("-o"), output_path.as_os_str()]),
         )
         .output()
@@ -66,7 +66,7 @@ fn assemble(args: CompileArgs, asm_files: Vec<OsString>) -> Result<(), BuildErro
     }
 
     if !args.emit_asm {
-        for asm_file in &asm_files {
+        for asm_file in asm_files {
             std::fs::remove_file(asm_file).expect("Build unit returned bad path");
         }
     }
@@ -82,7 +82,7 @@ fn build_unit(
     let temp_name = PathBuf::new().with_file_name(format!("_{module_num}"));
 
     let (src_path, i_path) = preprocess_unit(src_path, temp_name)?;
-    generate_unit(&compile_flags, src_path, &i_path)
+    generate_unit(compile_flags, &src_path, &i_path)
 }
 
 fn preprocess_unit(
@@ -113,20 +113,20 @@ fn preprocess_unit(
         }
     };
 
-    if !output.status.success() {
+    if output.status.success() {
+        Ok((src_path, i_path))
+    } else {
         Err(CompileError::PreprocessorError {
             src_path,
             err: String::from_utf8(output.stderr)
                 .unwrap_or_else(|_| "Preprocessor failed".to_string()),
         })
-    } else {
-        Ok((src_path, i_path))
     }
 }
 
 fn generate_unit(
-    compile_flags: &CompileFlags,
-    src_path: PathBuf,
+    compile_flags: CompileFlags,
+    src_path: &Path,
     i_path: &Path,
 ) -> Result<PathBuf, CompileError> {
     let src = std::fs::read_to_string(i_path).expect("Preprocessor failed to output to temp name");
@@ -142,7 +142,7 @@ fn generate_unit(
     let ast_arena = Arena::new();
 
     // Parse into an ast
-    let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path.clone())?;
+    let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path.to_path_buf())?;
     if compile_flags.show_pretty_ast {
         eprintln!("{}: {ast_tree}", src_path.display());
     }

@@ -27,14 +27,14 @@ pub enum Expr<A: Allocator> {
     Binary(BinaryOp, Box<Expr<A>, A>, Box<Expr<A>, A>), // Op, lhs, rhs
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Compliment,
     Negate,
     Not,
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     Div,
     Mul,

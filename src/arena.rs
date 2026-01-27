@@ -17,7 +17,7 @@ struct ArenaChunk<'a, T, A: Allocator = Global> {
     alloc: &'a A,
 }
 
-unsafe impl<'a, #[may_dangle] T, A: Allocator> Drop for ArenaChunk<'a, T, A> {
+unsafe impl<#[may_dangle] T, A: Allocator> Drop for ArenaChunk<'_, T, A> {
     fn drop(&mut self) {
         unsafe { drop(Box::from_raw_in(self.storage.as_mut(), &self.alloc)) }
     }
@@ -48,7 +48,7 @@ impl<'a, T, A: Allocator> ArenaChunk<'a, T, A> {
 
     #[inline]
     fn start(&mut self) -> *mut T {
-        self.storage.as_ptr() as *mut T
+        self.storage.as_ptr().cast()
     }
 
     #[inline]
@@ -94,7 +94,7 @@ impl<'a, A: Allocator> Arena<'a, A> {
         Self {
             ptr: Cell::new(ptr::null_mut()),
             end: Cell::new(ptr::null_mut()),
-            chunks: Default::default(),
+            chunks: RefCell::default(),
             alloc,
         }
     }
@@ -122,7 +122,7 @@ impl<'a, A: Allocator> Arena<'a, A> {
     }
 }
 
-unsafe impl<'a, A: Allocator> Allocator for Arena<'a, A> {
+unsafe impl<A: Allocator> Allocator for Arena<'_, A> {
     fn allocate(
         &self,
         layout: std::alloc::Layout,
@@ -190,7 +190,7 @@ impl<'a, T, A: Allocator> TypedArena<'a, T, A> {
         TypedArena {
             ptr: Cell::new(ptr::null_mut()),
             end: Cell::new(ptr::null_mut()),
-            chunks: Default::default(),
+            chunks: RefCell::default(),
             alloc,
             _own: PhantomData,
         }

@@ -211,8 +211,8 @@ impl<E: Display> ErrorCache<E> {
 
         // Ensures no panic if an empty src is inputted
         let sub_line_ranges = &line_ranges[start_line..end_line];
-        let start_line = &src
-            [sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.0.start as usize];
+        let start_line =
+            &src[sub_line_ranges.first().map_or(0, |range| range.start)..err.ctx.0.start as usize];
         let col = start_line.chars().count() + 1;
         let start_width = start_line.width();
         let end_width = src
@@ -228,14 +228,14 @@ impl<E: Display> ErrorCache<E> {
         }
     }
 
-    /// Returns the line_num, its width, and the line substr
+    /// Returns the `line_num`, its width, and the line substr
     fn lookup(&self, line_id: usize) -> (usize, usize, &str) {
         let (line_num, width, line_range) = self.lines[line_id].clone();
         let line = &self.cache[line_range];
         (line_num, width, line)
     }
 
-    /// Returns the first line num and the max width in chars of the line_nums from line_id range
+    /// Returns the first line num and the max width in chars of the `line_nums` from `line_id`` range
     fn get_start_info(&self, line_ids: &Range<usize>) -> (usize, usize) {
         let (line_num, _, _) = self.lookup(line_ids.start);
         let line_num_width = (line_num + line_ids.len() - 1)
@@ -286,8 +286,7 @@ impl<E: Display> ErrorCache<E> {
                 };
                 writeln!(
                     f,
-                    "\x1b[1m\x1b[36m{:>line_num_width$} |\x1b[0m {line}",
-                    line_num
+                    "\x1b[1m\x1b[36m{line_num:>line_num_width$} |\x1b[0m {line}",
                 )?;
                 // Do with stuff to draw squiggles under
                 writeln!(
@@ -307,7 +306,7 @@ impl<E: Display> ErrorCache<E> {
 ///
 /// error(bold and red): [err]
 fn write_err_header<E: Display>(f: &mut std::fmt::Formatter<'_>, err: E) -> std::fmt::Result {
-    writeln!(f, "\x1b[1m\x1b[31merror\x1b[39m: {}\x1b[0m", err)
+    writeln!(f, "\x1b[1m\x1b[31merror\x1b[39m: {err}\x1b[0m")
 }
 
 #[test]

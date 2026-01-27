@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, hash::Hash};
+use std::{collections::HashSet, fmt::Debug, hash::Hash, ptr};
 
 use crate::arena::TypedArena;
 
@@ -11,37 +11,37 @@ impl<'a, T: ?Sized + Eq + Hash> Interned<'a, T> {
     }
 }
 
-impl<'a, T: ?Sized + Eq + Hash> Debug for Interned<'a, T> {
+impl<T: ?Sized + Eq + Hash> Debug for Interned<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Interned({:p})", self.0)
     }
 }
 
-impl<'a, T: ?Sized + Eq + Hash> PartialEq for Interned<'a, T> {
+impl<T: ?Sized + Eq + Hash> PartialEq for Interned<'_, T> {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.0, other.0)
     }
 }
 
-impl<'a, T: ?Sized + Eq + Hash> Hash for Interned<'a, T> {
+impl<T: ?Sized + Eq + Hash> Hash for Interned<'_, T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (self.0 as *const T).addr().hash(state);
+        ptr::from_ref(self.0).addr().hash(state);
     }
 }
 
-impl<'a, T: ?Sized + Eq + Hash> Clone for Interned<'a, T> {
+impl<T: ?Sized + Eq + Hash> Clone for Interned<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T: ?Sized + Eq + Hash> Copy for Interned<'a, T> {}
+impl<T: ?Sized + Eq + Hash> Copy for Interned<'_, T> {}
 
 pub struct Interner<'a, T: ?Sized + Eq + Hash> {
     unique: HashSet<&'a T>,
 }
 
-impl<'a, T: ?Sized + Eq + Hash> Default for Interner<'a, T> {
+impl<T: ?Sized + Eq + Hash> Default for Interner<'_, T> {
     fn default() -> Self {
         Self::new()
     }
@@ -74,11 +74,14 @@ impl<'a, T: Eq + Hash> Interner<'a, T> {
     ///
     /// Slightly less efficient compared to `intern` because of double key lookup
     pub fn intern_in_arena(&mut self, arena: &'a TypedArena<T>, item: T) -> Interned<'a, T> {
-        let id = if !self.unique.contains(&item) {
+        let id = if self.unique.contains(&item) {
+            *self
+                .unique
+                .get(&item)
+                .expect("Already confirmed in the hashmap")
+        } else {
             let allocated = arena.alloc(item);
             *self.unique.entry(allocated).insert().get()
-        } else {
-            *self.unique.get(&item).unwrap()
         };
 
         Interned(id)

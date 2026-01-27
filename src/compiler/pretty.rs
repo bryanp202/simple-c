@@ -175,19 +175,22 @@ impl Display for tacky::Val<'_> {
         match self {
             Self::Const(imm) => write!(f, "${imm}"),
             Self::Temp(id) => write!(f, ".tmp{id}"),
-            Self::Var(id) => write!(f, "{}", id.get()),
+            Self::Global(id) => write!(f, "{}", id.get()),
         }
     }
 }
 
 impl PrettyPrint for tacky::Inst<'_> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
-        let spaces = indent * INDENT_SPACES;
+        let spaces = match self {
+            Self::Label(_) => indent.saturating_sub(1) * INDENT_SPACES,
+            _ => indent * INDENT_SPACES,
+        };
         write!(f, "{: >spaces$}", "")?;
         match self {
             Self::Binary { op, lhs, rhs, dst } => {
                 write!(f, "{dst} <- {lhs} {op} {rhs}")
-            },
+            }
             Self::Copy { src, dst } => write!(f, "{dst} <- {src}"),
             Self::Jump(label) => write!(f, "jmp {label}"),
             Self::JumpIfNotZero(src, label) => write!(f, "jmp {label} if {src} != 0"),

@@ -24,7 +24,7 @@ impl<'src> Lexer<'src> {
 
     pub fn advance_token(&mut self) -> Token {
         if let Err(err) = self.skip_whitespace() {
-            return self.emit_token(self.error(err));
+            return self.emit_token(TokenTy::Err(err));
         }
         let Some(c) = self.advance() else {
             return self.emit_token(TokenTy::Eof);
@@ -68,14 +68,14 @@ impl<'src> Lexer<'src> {
             // Special
             c if c.is_ascii_digit() => self.number(),
             c if c.is_alphabetic() => self.identifier(c),
-            _ => self.error(SyntaxError::UnknownSymbol),
+            _ => TokenTy::Err(SyntaxError::UnknownSymbol),
         };
 
         self.emit_token(ty)
     }
 }
 
-impl<'src> Lexer<'src> {
+impl Lexer<'_> {
     #[inline]
     fn emit_token(&mut self, ty: TokenTy) -> Token {
         let new_len_remaining = self.chars.as_str().len();
@@ -86,11 +86,6 @@ impl<'src> Lexer<'src> {
         self.start += len;
 
         Token::new(ty, start..self.start)
-    }
-
-    #[inline]
-    fn error(&self, err: SyntaxError) -> TokenTy {
-        TokenTy::Err(err)
     }
 
     #[inline]
@@ -185,7 +180,7 @@ impl<'src> Lexer<'src> {
             '.' | 'e' => self.float(),
             c if c.is_ascii_alphabetic() => {
                 self.eat_while(|c| c.is_ascii_alphanumeric());
-                self.error(SyntaxError::InvalidIntegerSuffix)
+                TokenTy::Err(SyntaxError::InvalidIntegerSuffix)
             }
             _ => TokenTy::Const,
         }
@@ -193,19 +188,20 @@ impl<'src> Lexer<'src> {
 
     /// A floating point literal
     fn float(&mut self) -> TokenTy {
-        self.error(SyntaxError::UnknownSymbol)
+        TokenTy::Err(SyntaxError::UnknownSymbol)
     }
 
     /// Check if keyword, else emit identifier
     fn identifier(&mut self, c: char) -> TokenTy {
         match c {
-            'i' => return self.check_keyword(TokenTy::Int, "nt"),
-            'r' => return self.check_keyword(TokenTy::Return, "eturn"),
-            'v' => return self.check_keyword(TokenTy::Void, "oid"),
-            _ => {}
+            'i' => self.check_keyword(TokenTy::Int, "nt"),
+            'r' => self.check_keyword(TokenTy::Return, "eturn"),
+            'v' => self.check_keyword(TokenTy::Void, "oid"),
+            _ => {
+                self.eat_while(char::is_alphanumeric);
+                TokenTy::Identifier
+            }
         }
-        self.eat_while(char::is_alphanumeric);
-        TokenTy::Identifier
     }
 
     /// Check if the rest remaining alphanumeric chars make up the target keyword

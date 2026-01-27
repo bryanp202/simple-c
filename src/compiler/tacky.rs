@@ -40,17 +40,18 @@ pub enum Inst<'src> {
 #[derive(Clone, Copy)]
 pub enum Val<'src> {
     Const(i32),
-    Var(Interned<'src, str>),
+    Global(Interned<'src, str>),
     Temp(usize),
 }
 
+#[derive(Clone, Copy)]
 pub enum UnaryOp {
     Compliment,
     Negate,
     Not,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
     Div,
     Mul,
@@ -135,42 +136,43 @@ impl<'src> AsmConverter {
 
     fn convert_inst(&mut self, inst: Inst, asm_insts: &mut Vec<asm::Inst>) {
         let last_inst = match inst {
-            Inst::Binary { op, lhs, rhs, dst } => self.convert_binary(op, lhs, rhs, dst, asm_insts),
-            Inst::Unary { op, src, dst } => self.convert_unary(op, src, dst, asm_insts),
+            Inst::Binary { op, lhs, rhs, dst } => Self::convert_binary(op, lhs, rhs, dst, asm_insts),
+            Inst::Unary { op, src, dst } => Self::convert_unary(op, src, dst, asm_insts),
             // Control flow
             Inst::Label(label) => asm::Inst::Label(label),
             Inst::Jump(label) => asm::Inst::Jump(label),
             Inst::JumpIfZero(src, label) => {
-                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), self.convert_val(src)));
+                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), Self::convert_val(src)));
                 asm::Inst::JumpCC(CompareOp::E, label)
             }
             Inst::JumpIfNotZero(src, label) => {
-                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), self.convert_val(src)));
+                asm_insts.push(asm::Inst::Cmp(Operand::Imm(0), Self::convert_val(src)));
                 asm::Inst::JumpCC(CompareOp::NE, label)
             }
             Inst::Ret(src) => {
-                let src = self.convert_val(src);
+                let src = Self::convert_val(src);
                 asm_insts.push(asm::Inst::Mov(src, asm::Operand::Reg(Reg::AX)));
                 asm::Inst::Ret
             }
             // Other
-            Inst::Copy { src, dst } => asm::Inst::Mov(self.convert_val(src), self.convert_val(dst)),
+            Inst::Copy { src, dst } => {
+                asm::Inst::Mov(Self::convert_val(src), Self::convert_val(dst))
+            }
         };
 
         asm_insts.push(last_inst);
     }
 
     fn convert_binary(
-        &mut self,
         op: BinaryOp,
         lhs: Val<'_>,
         rhs: Val<'_>,
         dst: Val<'_>,
         asm_insts: &mut Vec<asm::Inst>,
     ) -> asm::Inst {
-        let lhs = self.convert_val(lhs);
-        let rhs = self.convert_val(rhs);
-        let dst = self.convert_val(dst);
+        let lhs = Self::convert_val(lhs);
+        let rhs = Self::convert_val(rhs);
+        let dst = Self::convert_val(dst);
 
         match op {
             // Regular binary ops
@@ -235,14 +237,13 @@ impl<'src> AsmConverter {
     }
 
     fn convert_unary(
-        &mut self,
         op: UnaryOp,
         src: Val<'_>,
         dst: Val<'_>,
         asm_insts: &mut Vec<asm::Inst>,
     ) -> asm::Inst {
-        let src = self.convert_val(src);
-        let dst = self.convert_val(dst);
+        let src = Self::convert_val(src);
+        let dst = Self::convert_val(dst);
 
         match op {
             UnaryOp::Not => {
@@ -255,18 +256,18 @@ impl<'src> AsmConverter {
                 let asm_op = match op {
                     UnaryOp::Compliment => asm::UnaryOp::Not,
                     UnaryOp::Negate => asm::UnaryOp::Neg,
-                    _ => unreachable!(),
+                    UnaryOp::Not => unreachable!(),
                 };
                 asm::Inst::Unary(asm_op, dst)
             }
         }
     }
 
-    fn convert_val(&mut self, val: Val) -> asm::Operand {
+    fn convert_val(val: Val) -> asm::Operand {
         match val {
             Val::Const(imm) => asm::Operand::Imm(imm),
             Val::Temp(id) => asm::Operand::Psuedo(id),
-            _ => todo!(),
+            Val::Global(_) => todo!(),
         }
     }
 }
@@ -330,15 +331,11 @@ impl<'src> AsmConverter {
         asm::Program { item }
     }
 
-    fn fix_function(
-        &mut self,
-        name: Interned<'src, str>,
-        insts: Vec<asm::Inst>,
-    ) -> asm::Item<'src> {
+    fn fix_function(&self, name: Interned<'src, str>, insts: Vec<asm::Inst>) -> asm::Item<'src> {
         let mut fixed_insts = vec![asm::Inst::AllocateStack(self.stack)];
 
         for inst in insts {
-            self.fix_inst(inst, &mut fixed_insts);
+            Self::fix_inst(inst, &mut fixed_insts);
         }
 
         asm::Item::Fn {
@@ -347,9 +344,9 @@ impl<'src> AsmConverter {
         }
     }
 
-    fn fix_inst(&mut self, inst: asm::Inst, fixed_insts: &mut Vec<asm::Inst>) {
+    fn fix_inst(inst: asm::Inst, fixed_insts: &mut Vec<asm::Inst>) {
         let last_inst = match inst {
-            asm::Inst::Binary(op, src, dst) => self.fix_binary_inst(op, src, dst, fixed_insts),
+            asm::Inst::Binary(op, src, dst) => Self::fix_binary_inst(op, src, dst, fixed_insts),
 
             // Prevent imm div operands
             asm::Inst::IDiv(operand) => {
@@ -362,13 +359,13 @@ impl<'src> AsmConverter {
             }
 
             //  Prevent mem to mem move
-            asm::Inst::Mov(src, dst) if is_mem_to_mem(&src, &dst) => {
+            asm::Inst::Mov(src, dst) if is_mem_to_mem(src, dst) => {
                 fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::R10)));
                 asm::Inst::Mov(Operand::Reg(Reg::R10), dst)
             }
 
             // Prevent mem to mem cmp
-            asm::Inst::Cmp(a, b) if is_mem_to_mem(&a, &b) => {
+            asm::Inst::Cmp(a, b) if is_mem_to_mem(a, b) => {
                 fixed_insts.push(asm::Inst::Mov(a, Operand::Reg(Reg::R10)));
                 asm::Inst::Cmp(Operand::Reg(Reg::R10), b)
             }
@@ -393,7 +390,6 @@ impl<'src> AsmConverter {
     }
 
     fn fix_binary_inst(
-        &mut self,
         op: asm::BinaryOp,
         src: Operand,
         dst: Operand,
@@ -406,7 +402,7 @@ impl<'src> AsmConverter {
             | asm::BinaryOp::And
             | asm::BinaryOp::Or
             | asm::BinaryOp::Xor
-                if is_mem_to_mem(&src, &dst) =>
+                if is_mem_to_mem(src, dst) =>
             {
                 fixed_insts.push(asm::Inst::Mov(src, Operand::Reg(Reg::R10)));
                 asm::Inst::Binary(op, Operand::Reg(Reg::R10), dst)
@@ -441,6 +437,6 @@ impl<'src> AsmConverter {
     }
 }
 
-fn is_mem_to_mem(a: &Operand, b: &Operand) -> bool {
+fn is_mem_to_mem(a: Operand, b: Operand) -> bool {
     matches!(a, Operand::Stack(_)) && matches!(b, Operand::Stack(_))
 }

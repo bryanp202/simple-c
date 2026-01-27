@@ -34,6 +34,7 @@ struct CompileArgs {
     emit_asm: bool,
 }
 
+#[derive(Clone, Copy)]
 struct CompileFlags {
     show_pretty_ast: bool,
     show_pretty_tacky: bool,
@@ -60,7 +61,7 @@ fn main() -> ExitCode {
             eprint!("{build_err}");
             ExitCode::FAILURE
         }
-        Ok(_) => ExitCode::SUCCESS,
+        Ok(()) => ExitCode::SUCCESS,
     };
     println!("Time to run: {:?}", start.elapsed());
     exit_code
