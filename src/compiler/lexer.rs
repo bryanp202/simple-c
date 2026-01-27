@@ -41,17 +41,35 @@ impl<'src> Lexer<'src> {
 
             // Single or double
             // Arith
+            '+' if self.eat_if('+') => TokenTy::PlusPlus,
+            '+' if self.eat_if('=') => TokenTy::PlusEqual,
             '+' => TokenTy::Plus,
             '-' if self.eat_if('-') => TokenTy::MinusMinus,
+            '-' if self.eat_if('=') => TokenTy::MinusEqual,
             '-' => TokenTy::Minus,
+            '*' if self.eat_if('=') => TokenTy::StarEqual,
             '*' => TokenTy::Star,
+            '/' if self.eat_if('=') => TokenTy::SlashEqual,
             '/' => TokenTy::Slash,
+            '%' if self.eat_if('=') => TokenTy::PercentEqual,
             '%' => TokenTy::Percent,
             // Compare/Shift
-            '>' if self.eat_if('>') => TokenTy::GreaterGreater,
+            '>' if self.eat_if('>') => {
+                if self.eat_if('=') {
+                    TokenTy::GreaterGreaterEqual
+                } else {
+                    TokenTy::GreaterGreater
+                }
+            }
             '>' if self.eat_if('=') => TokenTy::GreaterEqual,
             '>' => TokenTy::Greater,
-            '<' if self.eat_if('<') => TokenTy::LessLess,
+            '<' if self.eat_if('<') => {
+                if self.eat_if('=') {
+                    TokenTy::LessLessEqual
+                } else {
+                    TokenTy::LessLess
+                }
+            }
             '<' if self.eat_if('=') => TokenTy::LessEqual,
             '<' => TokenTy::Less,
             '=' if self.eat_if('=') => TokenTy::EqualEqual,
@@ -60,9 +78,12 @@ impl<'src> Lexer<'src> {
             '!' => TokenTy::Bang,
             // Bitwise
             '&' if self.eat_if('&') => TokenTy::AmpersandAmpersand,
+            '&' if self.eat_if('=') => TokenTy::AmpersandEqual,
             '&' => TokenTy::Ampersand,
+            '^' if self.eat_if('=') => TokenTy::CaretEqual,
             '^' => TokenTy::Caret,
             '|' if self.eat_if('|') => TokenTy::PipePipe,
+            '|' if self.eat_if('=') => TokenTy::PipeEqual,
             '|' => TokenTy::Pipe,
 
             // Special

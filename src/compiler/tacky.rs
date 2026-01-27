@@ -136,7 +136,9 @@ impl<'src> AsmConverter {
 
     fn convert_inst(&mut self, inst: Inst, asm_insts: &mut Vec<asm::Inst>) {
         let last_inst = match inst {
-            Inst::Binary { op, lhs, rhs, dst } => Self::convert_binary(op, lhs, rhs, dst, asm_insts),
+            Inst::Binary { op, lhs, rhs, dst } => {
+                Self::convert_binary(op, lhs, rhs, dst, asm_insts)
+            }
             Inst::Unary { op, src, dst } => Self::convert_unary(op, src, dst, asm_insts),
             // Control flow
             Inst::Label(label) => asm::Inst::Label(label),
