@@ -4,14 +4,17 @@ use crate::{
 };
 
 pub struct Program<'src> {
-    pub(crate) item: Item<'src>,
+    pub(crate) functions: Vec<Function<'src>>,
+    pub(crate) globals: Vec<GlobalVar<'src>>,
 }
 
-pub enum Item<'src> {
-    Fn {
-        name: Interned<'src, str>,
-        insts: Vec<Inst<'src>>,
-    },
+pub struct GlobalVar<'src> {
+    pub(crate) name: Interned<'src, str>,
+}
+
+pub struct Function<'src> {
+    pub(crate) name: Interned<'src, str>,
+    pub(crate) insts: Vec<Inst<'src>>,
 }
 
 pub enum Inst<'src> {
@@ -40,7 +43,7 @@ pub enum Inst<'src> {
 #[derive(Clone, Copy)]
 pub enum Val<'src> {
     Const(i32),
-    Global(Interned<'src, str>),
+    GlobalVar(Interned<'src, str>),
     Temp(usize),
 }
 
@@ -113,28 +116,39 @@ impl<'src> AsmConverter {
 
     fn convert_program(&mut self, program: Program<'src>) -> asm::Program<'src> {
         asm::Program {
-            item: self.convert_item(program.item),
+            globals: program
+                .globals
+                .into_iter()
+                .map(|global| self.convert_global(global))
+                .collect(),
+            functions: program
+                .functions
+                .into_iter()
+                .map(|fun| self.convert_fun(fun))
+                .collect(),
         }
     }
 
-    fn convert_item(&mut self, item: Item<'src>) -> asm::Item<'src> {
-        match item {
-            Item::Fn { name, insts } => {
-                let mut asm_insts = Vec::new();
+    fn convert_global(&mut self, global: GlobalVar<'src>) -> asm::GlobalVar<'src> {
+        let GlobalVar { name } = global;
+        asm::GlobalVar { name }
+    }
 
-                for inst in insts {
-                    self.convert_inst(inst, &mut asm_insts);
-                }
+    fn convert_fun(&mut self, fun: Function<'src>) -> asm::Function<'src> {
+        let Function { name, insts } = fun;
+        let mut asm_insts = Vec::new();
 
-                asm::Item::Fn {
-                    name,
-                    insts: asm_insts,
-                }
-            }
+        for inst in insts {
+            self.convert_inst(inst, &mut asm_insts);
+        }
+
+        asm::Function {
+            name,
+            insts: asm_insts,
         }
     }
 
-    fn convert_inst(&mut self, inst: Inst, asm_insts: &mut Vec<asm::Inst>) {
+    fn convert_inst(&mut self, inst: Inst<'src>, asm_insts: &mut Vec<asm::Inst<'src>>) {
         let last_inst = match inst {
             Inst::Binary { op, lhs, rhs, dst } => {
                 Self::convert_binary(op, lhs, rhs, dst, asm_insts)
@@ -167,11 +181,11 @@ impl<'src> AsmConverter {
 
     fn convert_binary(
         op: BinaryOp,
-        lhs: Val<'_>,
-        rhs: Val<'_>,
-        dst: Val<'_>,
-        asm_insts: &mut Vec<asm::Inst>,
-    ) -> asm::Inst {
+        lhs: Val<'src>,
+        rhs: Val<'src>,
+        dst: Val<'src>,
+        asm_insts: &mut Vec<asm::Inst<'src>>,
+    ) -> asm::Inst<'src> {
         let lhs = Self::convert_val(lhs);
         let rhs = Self::convert_val(rhs);
         let dst = Self::convert_val(dst);
@@ -240,10 +254,10 @@ impl<'src> AsmConverter {
 
     fn convert_unary(
         op: UnaryOp,
-        src: Val<'_>,
-        dst: Val<'_>,
-        asm_insts: &mut Vec<asm::Inst>,
-    ) -> asm::Inst {
+        src: Val<'src>,
+        dst: Val<'src>,
+        asm_insts: &mut Vec<asm::Inst<'src>>,
+    ) -> asm::Inst<'src> {
         let src = Self::convert_val(src);
         let dst = Self::convert_val(dst);
 
@@ -269,33 +283,40 @@ impl<'src> AsmConverter {
         match val {
             Val::Const(imm) => asm::Operand::Imm(imm),
             Val::Temp(id) => asm::Operand::Psuedo(id),
-            Val::Global(_) => todo!(),
+            Val::GlobalVar(_) => todo!(),
         }
     }
 }
 
 impl<'src> AsmConverter {
     fn fill_registers(&mut self, program: asm::Program<'src>) -> asm::Program<'src> {
-        let item = match program.item {
-            asm::Item::Fn { name, insts } => self.fill_function(name, insts),
-        };
+        let asm::Program { globals, functions } = program;
+        let globals = globals
+            .into_iter()
+            .map(|global| self.fill_global(global))
+            .collect();
+        let functions = functions
+            .into_iter()
+            .map(|fun| self.fill_function(fun))
+            .collect();
 
-        asm::Program { item }
+        asm::Program { globals, functions }
     }
 
-    fn fill_function(
-        &mut self,
-        name: Interned<'src, str>,
-        insts: Vec<asm::Inst>,
-    ) -> asm::Item<'src> {
+    fn fill_global(&mut self, global: asm::GlobalVar<'src>) -> asm::GlobalVar<'src> {
+        global
+    }
+
+    fn fill_function(&mut self, fun: asm::Function<'src>) -> asm::Function<'src> {
+        let asm::Function { name, insts } = fun;
         let filled_insts = insts.into_iter().map(|inst| self.fill_inst(inst)).collect();
-        asm::Item::Fn {
+        asm::Function {
             name,
             insts: filled_insts,
         }
     }
 
-    fn fill_inst(&mut self, inst: asm::Inst) -> asm::Inst {
+    fn fill_inst(&mut self, inst: asm::Inst<'src>) -> asm::Inst<'src> {
         match inst {
             asm::Inst::Unary(op, dst) => asm::Inst::Unary(op, self.fill_operand(dst)),
             asm::Inst::Binary(op, src, dst) => {
@@ -319,34 +340,42 @@ impl<'src> AsmConverter {
         }
     }
 
-    fn fill_operand(&mut self, operand: Operand) -> Operand {
+    fn fill_operand(&mut self, operand: Operand<'src>) -> Operand<'src> {
         match operand {
             Operand::Psuedo(num) => Operand::Stack(self.reserve_or_get(num, 4, 4)),
-            Operand::Imm(_) | Operand::Reg(_) | Operand::Stack(_) => operand,
+            Operand::Imm(_) | Operand::Reg(_) | Operand::Stack(_) | Operand::GlobalVar(_) => {
+                operand
+            }
         }
     }
+}
 
+impl<'src> AsmConverter {
     fn fix(&mut self, program: asm::Program<'src>) -> asm::Program<'src> {
-        let item = match program.item {
-            asm::Item::Fn { name, insts } => self.fix_function(name, insts),
-        };
-        asm::Program { item }
+        let asm::Program { globals, functions } = program;
+        let functions = functions
+            .into_iter()
+            .map(|fun| self.fix_function(fun))
+            .collect();
+
+        asm::Program { globals, functions }
     }
 
-    fn fix_function(&self, name: Interned<'src, str>, insts: Vec<asm::Inst>) -> asm::Item<'src> {
+    fn fix_function(&self, fun: asm::Function<'src>) -> asm::Function<'src> {
+        let asm::Function { name, insts } = fun;
         let mut fixed_insts = vec![asm::Inst::AllocateStack(self.stack)];
 
         for inst in insts {
             Self::fix_inst(inst, &mut fixed_insts);
         }
 
-        asm::Item::Fn {
+        asm::Function {
             name,
             insts: fixed_insts,
         }
     }
 
-    fn fix_inst(inst: asm::Inst, fixed_insts: &mut Vec<asm::Inst>) {
+    fn fix_inst(inst: asm::Inst<'src>, fixed_insts: &mut Vec<asm::Inst<'src>>) {
         let last_inst = match inst {
             asm::Inst::Binary(op, src, dst) => Self::fix_binary_inst(op, src, dst, fixed_insts),
 
@@ -393,10 +422,10 @@ impl<'src> AsmConverter {
 
     fn fix_binary_inst(
         op: asm::BinaryOp,
-        src: Operand,
-        dst: Operand,
-        fixed_insts: &mut Vec<asm::Inst>,
-    ) -> asm::Inst {
+        src: Operand<'src>,
+        dst: Operand<'src>,
+        fixed_insts: &mut Vec<asm::Inst<'src>>,
+    ) -> asm::Inst<'src> {
         match op {
             // Prevent memory to memory binary ops
             asm::BinaryOp::Add

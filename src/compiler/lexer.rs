@@ -217,6 +217,7 @@ impl Lexer<'_> {
         match c {
             'i' => self.check_keyword(TokenTy::Int, "nt"),
             'r' => self.check_keyword(TokenTy::Return, "eturn"),
+            't' => self.check_keyword(TokenTy::Typedef, "ypedef"),
             'v' => self.check_keyword(TokenTy::Void, "oid"),
             _ => {
                 self.eat_while(char::is_alphanumeric);

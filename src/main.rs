@@ -9,7 +9,7 @@ use crate::compiler::compile;
 
 mod arena;
 mod compiler;
-pub mod intern;
+mod intern;
 
 /// A simple C lang implementation
 #[derive(Debug, Parser)]
@@ -63,6 +63,6 @@ fn main() -> ExitCode {
         }
         Ok(()) => ExitCode::SUCCESS,
     };
-    println!("Time to run: {:?}", start.elapsed());
+    eprintln!("Time to run: {:?}", start.elapsed());
     exit_code
 }

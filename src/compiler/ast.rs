@@ -5,15 +5,25 @@ use crate::{
     intern::Interned,
 };
 
-pub struct Program<'src, A: Allocator = Global> {
-    pub(crate) item: Item<'src, A>,
-}
-
 pub enum Item<'src, A: Allocator = Global> {
     Fn {
         name: Interned<'src, str>,
-        body: Stmt<A>,
+        body: Vec<Stmt<A>>,
     },
+}
+
+pub struct Program<'src, A: Allocator = Global> {
+    pub(crate) functions: Vec<Function<'src, A>>,
+    pub(crate) globals: Vec<GlobalVar<'src>>,
+}
+
+pub struct GlobalVar<'src> {
+    pub(crate) name: Interned<'src, str>,
+}
+
+pub struct Function<'src, A: Allocator = Global> {
+    pub(crate) name: Interned<'src, str>,
+    pub(crate) body: Vec<Stmt<A>>,
 }
 
 pub enum Stmt<A: Allocator = Global> {
@@ -79,8 +89,16 @@ impl TackyConverter {
         &mut self,
         program: Program<'src, A>,
     ) -> tacky::Program<'src> {
-        let item = self.item(program.item);
-        tacky::Program { item }
+        let Program { globals, functions } = program;
+        let globals = globals
+            .into_iter()
+            .map(|global| self.global(global))
+            .collect();
+        let functions = functions
+            .into_iter()
+            .map(|fun| self.function(fun))
+            .collect();
+        tacky::Program { globals, functions }
     }
 }
 
@@ -97,14 +115,20 @@ impl<'src> TackyConverter {
         Label(label)
     }
 
-    fn item(&mut self, item: Item<'src, impl Allocator>) -> tacky::Item<'src> {
-        match item {
-            Item::Fn { name, body } => {
-                let mut insts = Vec::new();
-                self.stmt(body, &mut insts);
-                tacky::Item::Fn { name, insts }
-            }
+    fn global(&self, global: GlobalVar<'src>) -> tacky::GlobalVar<'src> {
+        let GlobalVar { name } = global;
+        tacky::GlobalVar { name }
+    }
+
+    fn function(&mut self, fun: Function<'src, impl Allocator>) -> tacky::Function<'src> {
+        let Function { name, body } = fun;
+        let mut insts = Vec::new();
+
+        for stmt in body {
+            self.stmt(stmt, &mut insts);
         }
+
+        tacky::Function { name, insts }
     }
 
     fn stmt(&mut self, stmt: Stmt<impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) {

@@ -8,33 +8,36 @@ use std::{
 use crate::intern::Interned;
 
 pub struct Program<'src> {
-    pub(crate) item: Item<'src>,
+    pub(crate) functions: Vec<Function<'src>>,
+    pub(crate) globals: Vec<GlobalVar<'src>>,
 }
 
-pub enum Item<'src> {
-    Fn {
-        name: Interned<'src, str>,
-        insts: Vec<Inst>,
-    },
+pub struct GlobalVar<'src> {
+    pub(crate) name: Interned<'src, str>,
+}
+
+pub struct Function<'src> {
+    pub(crate) name: Interned<'src, str>,
+    pub(crate) insts: Vec<Inst<'src>>,
 }
 
 /// Assembly struction abstraction
 ///
 /// All binary inst are stored as (src, dst), similar to AT&T syntax
-pub enum Inst {
-    Unary(UnaryOp, Operand),
-    Binary(BinaryOp, Operand, Operand),
+pub enum Inst<'src> {
+    Unary(UnaryOp, Operand<'src>),
+    Binary(BinaryOp, Operand<'src>, Operand<'src>),
     // Control flow
     Label(Label),
     Jump(Label),
     JumpCC(CompareOp, Label),
     // Other
-    Cmp(Operand, Operand),
-    SetCC(CompareOp, Operand),
+    Cmp(Operand<'src>, Operand<'src>),
+    SetCC(CompareOp, Operand<'src>),
     Cdq,
-    Mov(Operand, Operand),
+    Mov(Operand<'src>, Operand<'src>),
     // Special
-    IDiv(Operand),
+    IDiv(Operand<'src>),
     // Function
     AllocateStack(usize),
     Ret,
@@ -44,11 +47,12 @@ pub enum Inst {
 pub struct Label(pub(crate) usize);
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum Operand {
+pub enum Operand<'src> {
     Imm(i32),
     Reg(Reg),
     Psuedo(usize),
     Stack(usize),
+    GlobalVar(Interned<'src, str>),
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -79,12 +83,12 @@ pub enum CompareOp {
     GE,
 }
 
-pub struct OneByteOperand<'o>(&'o Operand);
-pub struct TwoByteOperand<'o>(&'o Operand);
-pub struct FourByteOperand<'o>(&'o Operand);
-pub struct EightByteOperand<'o>(&'o Operand);
+pub struct OneByteOperand<'o>(&'o Operand<'o>);
+pub struct TwoByteOperand<'o>(&'o Operand<'o>);
+pub struct FourByteOperand<'o>(&'o Operand<'o>);
+pub struct EightByteOperand<'o>(&'o Operand<'o>);
 
-impl Operand {
+impl Operand<'_> {
     /// Display as one byte registers
     fn display_b(&self) -> OneByteOperand<'_> {
         OneByteOperand(self)
@@ -124,28 +128,38 @@ impl Program<'_> {
 
 impl Display for Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.item)
-    }
-}
-
-impl Display for Item<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Fn { name, insts } => {
-                writeln!(f, "    .globl {}", name.get())?;
-                writeln!(f, "{}:", name.get())?;
-                writeln!(f, "    pushq %rbp")?;
-                writeln!(f, "    movq %rsp, %rbp")?;
-                for inst in insts {
-                    writeln!(f, "{inst}")?;
-                }
-                Ok(())
-            }
+        for global in &self.globals {
+            writeln!(f, "{global}")?;
         }
+
+        for fun in &self.functions {
+            writeln!(f, "{fun}")?;
+        }
+        Ok(())
     }
 }
 
-impl Display for Inst {
+impl Display for GlobalVar<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!("GlobalVar")
+    }
+}
+
+impl Display for Function<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Function { name, insts } = self;
+        writeln!(f, "    .globl {}", name.get())?;
+        writeln!(f, "{}:", name.get())?;
+        writeln!(f, "    pushq %rbp")?;
+        writeln!(f, "    movq %rsp, %rbp")?;
+        for inst in insts {
+            writeln!(f, "{inst}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for Inst<'_> {
     // All instructions after the first must have "    " (four spaces)
     // Last instruction should be write!(...)
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -237,6 +251,7 @@ impl Display for OneByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_one_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -248,6 +263,7 @@ impl Display for TwoByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_two_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -259,6 +275,7 @@ impl Display for FourByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_four_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -270,6 +287,7 @@ impl Display for EightByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_eight_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
             Operand::Psuedo(_) => unreachable!(),
         }
     }

@@ -1,2 +1,9 @@
 Maybe tokens should have line numbers for duplicate declaration errors?
 Pretty printers
+Typedef and typeid are resolved while parsing
+Type names in semantic errors are just strings (should be only up to a few kb of data, maybe leak them?
+    probably doesnt matter, but making freeing fast might be good? Arena?)
+No backend symbol table:
+- static variables in fn are added at global item for that program, but are not accessible from anywhere outside the method
+- Add a tacky GetArg(asm::Reg) inst so optimizer knows where arguments are coming from
+- TypedAst has local and global nodes. local nodes are just unique numbers and global are interned str

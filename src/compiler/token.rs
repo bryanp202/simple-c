@@ -12,6 +12,7 @@ pub enum TokenTy {
     // Keywords
     Int,
     Return,
+    Typedef,
     Void,
     // Single character
     CloseBrace,

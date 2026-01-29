@@ -14,8 +14,34 @@ pub trait PrettyPrint {
 impl<A: Allocator> Display for ast::Program<'_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Program [")?;
-        self.item.pretty(f, 1)?;
+        for global in &self.globals {
+            global.pretty(f, 1)?;
+        }
+        for fun in &self.functions {
+            fun.pretty(f, 1)?;
+        }
         writeln!(f, "]")
+    }
+}
+
+impl PrettyPrint for ast::GlobalVar<'_> {
+    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+        let ast::GlobalVar { name } = self;
+        let spaces = indent * INDENT_SPACES;
+        writeln!(f, "{: >spaces$}Global \"{}\"", "", name.get())
+    }
+}
+
+impl<A: Allocator> PrettyPrint for ast::Function<'_, A> {
+    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+        let ast::Function { name, body } = self;
+        let spaces = indent * INDENT_SPACES;
+        writeln!(f, "{: >spaces$}Fn \"{}\": ", "", name.get())?;
+        for stmt in body {
+            stmt.pretty(f, indent + 1)?;
+            writeln!(f)?;
+        }
+        writeln!(f, "{: >spaces$}}},", "")
     }
 }
 
@@ -53,20 +79,6 @@ impl Display for ast::UnaryOp {
             Self::Not => "!",
         };
         write!(f, "{c}")
-    }
-}
-
-impl<A: Allocator> PrettyPrint for ast::Item<'_, A> {
-    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
-        let spaces = indent * INDENT_SPACES;
-        write!(f, "{: >spaces$}Item: ", "")?;
-        match self {
-            Self::Fn { name, body } => {
-                writeln!(f, "Fn \"{}\" {{", name.get())?;
-                body.pretty(f, indent + 1)?;
-            }
-        }
-        writeln!(f, "{: >spaces$}}},", "")
     }
 }
 
@@ -113,23 +125,32 @@ impl<A: Allocator> PrettyPrint for ast::Expr<A> {
 impl Display for tacky::Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Program [")?;
-        self.item.pretty(f, 1)?;
+        for global in &self.globals {
+            global.pretty(f, 1)?;
+        }
+        for fun in &self.functions {
+            fun.pretty(f, 1)?;
+        }
         writeln!(f, "]")
     }
 }
 
-impl PrettyPrint for tacky::Item<'_> {
+impl PrettyPrint for tacky::GlobalVar<'_> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+        let tacky::GlobalVar { name } = self;
         let spaces = indent * INDENT_SPACES;
-        write!(f, "{: >spaces$}Item: ", "")?;
-        match self {
-            Self::Fn { name, insts } => {
-                writeln!(f, "Fn \"{}\" {{", name.get())?;
-                for inst in insts {
-                    inst.pretty(f, indent + 1)?;
-                    writeln!(f)?;
-                }
-            }
+        writeln!(f, "{: >spaces$}Global \"{}\"", "", name.get())
+    }
+}
+
+impl PrettyPrint for tacky::Function<'_> {
+    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+        let tacky::Function { name, insts } = self;
+        let spaces = indent * INDENT_SPACES;
+        writeln!(f, "{: >spaces$}Fn \"{}\": ", "", name.get())?;
+        for inst in insts {
+            inst.pretty(f, indent + 1)?;
+            writeln!(f)?;
         }
         writeln!(f, "{: >spaces$}}},", "")
     }
@@ -175,7 +196,7 @@ impl Display for tacky::Val<'_> {
         match self {
             Self::Const(imm) => write!(f, "${imm}"),
             Self::Temp(id) => write!(f, ".tmp{id}"),
-            Self::Global(id) => write!(f, "{}", id.get()),
+            Self::GlobalVar(id) => write!(f, "{}", id.get()),
         }
     }
 }

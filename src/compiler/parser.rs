@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, UnaryOp},
+        ast::{self, Function, UnaryOp, GlobalVar},
         error::{CompileError, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
         token::{Token, TokenTy},
@@ -25,6 +25,8 @@ pub struct Parser<'src, 'arena> {
     curr: Token,
     prev: Token,
     errors: Vec<SyntaxErrorWithCtx>,
+    // Program data
+    globals: Vec<GlobalVar<'src>>,
 }
 
 impl<'src, 'arena> Parser<'src, 'arena> {
@@ -41,19 +43,31 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             curr: Token::new(TokenTy::Eof, 0..0),
             prev: Token::new(TokenTy::Eof, 0..0),
             errors: Vec::new(),
+            globals: Vec::new(),
         }
     }
 
     pub fn parse(mut self, src_path: PathBuf) -> Result<Program<'src, 'arena>, CompileError> {
+        let mut functions = Vec::new();
+
         self.advance_unchecked();
-        let Some(item) = self.item() else {
-            return Err(CompileError::from_syntax_errors(
-                self.src,
-                src_path,
-                self.errors,
-            ));
-        };
-        let program = Program { item };
+        while !self.at_end() {
+            let Some(item) = self.item() else {
+                return Err(CompileError::from_syntax_errors(
+                    self.src,
+                    src_path,
+                    self.errors,
+                ));
+            };
+
+            match item {
+                Item::Fn { name, body } => {
+                    functions.push(Function { name, body });
+                }
+            }
+        }
+
+        let program = Program { globals: self.globals, functions };
         Ok(program)
     }
 }
@@ -100,10 +114,6 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     #[inline]
     fn check(&self, expected: TokenTy) -> bool {
         self.curr.ty == expected
-    }
-
-    fn check_any(&self, iter: impl IntoIterator<Item = TokenTy>) -> bool {
-        iter.into_iter().any(|expected| self.check(expected))
     }
 
     #[inline]
@@ -156,9 +166,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
         self.eat(TokenTy::OpenBrace, SyntaxError::UnterminatedBlockComment)?;
 
-        let body = self.stmt()?;
+        let mut body = Vec::new();
+        while !self.at_end() && !self.check(TokenTy::CloseBrace) {
+            body.push(self.stmt()?);
+        }
 
-        self.eat(TokenTy::CloseBrace, SyntaxError::UnknownSymbol)?;
+        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter)?;
 
         Ok(Item::Fn { name, body })
     }
@@ -192,20 +205,19 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     fn unary(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        const UNARY_OPS: [TokenTy; 3] = [TokenTy::Minus, TokenTy::Tilde, TokenTy::Bang];
-
-        if self.check_any(UNARY_OPS) {
-            self.advance_unchecked();
-            let op = match self.prev.ty {
-                TokenTy::Minus => UnaryOp::Negate,
-                TokenTy::Tilde => UnaryOp::Compliment,
-                TokenTy::Bang => UnaryOp::Not,
-                _ => unreachable!(),
-            };
-            let operand = self.unary()?;
-            Ok(Expr::Unary(op, self.alloc_expr(operand)))
-        } else {
-            self.literal()
+        match self.peek() {
+            TokenTy::Minus | TokenTy::Tilde | TokenTy::Bang => {
+                self.advance_unchecked();
+                let op = match self.prev.ty {
+                    TokenTy::Minus => UnaryOp::Negate,
+                    TokenTy::Tilde => UnaryOp::Compliment,
+                    TokenTy::Bang => UnaryOp::Not,
+                    _ => unreachable!(),
+                };
+                let operand = self.unary()?;
+                Ok(Expr::Unary(op, self.alloc_expr(operand)))
+            }
+            _ => self.literal(),
         }
     }
 
