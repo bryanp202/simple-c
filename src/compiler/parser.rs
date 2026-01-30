@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, Function, UnaryOp, GlobalVar},
+        ast::{self, AssignOp, BinaryOp, Function, GlobalVar, UnaryOp},
         error::{CompileError, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
-        token::{Token, TokenTy},
+        token::{Precedence, Token, TokenTy},
     },
     intern::Interner,
 };
@@ -14,14 +14,14 @@ use crate::{
 type Alloc<'a> = &'a Arena<'static>;
 type Program<'s, 'a> = ast::Program<'s, Alloc<'a>>;
 type Item<'s, 'a> = ast::Item<'s, Alloc<'a>>;
-type Stmt<'a> = ast::Stmt<Alloc<'a>>;
-type Expr<'a> = ast::Expr<Alloc<'a>>;
+type Stmt<'s, 'a> = ast::Stmt<'s, Alloc<'a>>;
+type Expr<'s, 'a> = ast::Expr<'s, Alloc<'a>>;
 
-pub struct Parser<'src, 'arena> {
+pub struct Parser<'src, 'a> {
     src: &'src str,
     lexer: Lexer<'src>,
     id_interner: &'src mut Interner<'src, str>,
-    ast_arena: Alloc<'arena>,
+    ast_arena: Alloc<'a>,
     curr: Token,
     prev: Token,
     errors: Vec<SyntaxErrorWithCtx>,
@@ -29,11 +29,11 @@ pub struct Parser<'src, 'arena> {
     globals: Vec<GlobalVar<'src>>,
 }
 
-impl<'src, 'arena> Parser<'src, 'arena> {
+impl<'src, 'a> Parser<'src, 'a> {
     pub fn new(
         src: &'src str,
         id_interner: &'src mut Interner<'src, str>,
-        ast_arena: &'arena Arena<'static>,
+        ast_arena: &'a Arena<'static>,
     ) -> Self {
         Self {
             src,
@@ -47,7 +47,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         }
     }
 
-    pub fn parse(mut self, src_path: PathBuf) -> Result<Program<'src, 'arena>, CompileError> {
+    pub fn parse(mut self, src_path: PathBuf) -> Result<Program<'src, 'a>, CompileError> {
         let mut functions = Vec::new();
 
         self.advance_unchecked();
@@ -62,19 +62,22 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
             match item {
                 Item::Fn { name, body } => {
-                    functions.push(Function { name, body });
+                    functions.push(Function { name, body, local_count: 0 });
                 }
             }
         }
 
-        let program = Program { globals: self.globals, functions };
+        let program = Program {
+            globals: self.globals,
+            functions,
+        };
         Ok(program)
     }
 }
 
-impl<'src, 'arena> Parser<'src, 'arena> {
+impl<'src, 'a> Parser<'src, 'a> {
     #[inline]
-    fn alloc_expr(&self, expr: Expr<'arena>) -> Box<Expr<'arena>, Alloc<'arena>> {
+    fn alloc_expr(&self, expr: Expr<'src, 'a>) -> Box<Expr<'src, 'a>, Alloc<'a>> {
         Box::new_in(expr, self.ast_arena)
     }
 
@@ -146,7 +149,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         }
     }
 
-    fn item(&mut self) -> Option<Item<'src, 'arena>> {
+    fn item(&mut self) -> Option<Item<'src, 'a>> {
         match self.function() {
             Ok(fun) => Some(fun),
             Err(err) => {
@@ -156,9 +159,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         }
     }
 
-    fn function(&mut self) -> Result<Item<'src, 'arena>, SyntaxErrorWithCtx> {
+    fn function(&mut self) -> Result<Item<'src, 'a>, SyntaxErrorWithCtx> {
         self.eat(TokenTy::Int, SyntaxError::UnknownSymbol)?;
-        self.eat(TokenTy::Identifier, SyntaxError::InvalidIntegerSuffix)?;
+        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
         let name_token = self.prev.clone();
         let name = self.id_interner.intern(&self.src[name_token.ctx]);
 
@@ -176,71 +179,155 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         Ok(Item::Fn { name, body })
     }
 
-    fn stmt(&mut self) -> Result<Stmt<'arena>, SyntaxErrorWithCtx> {
-        self.eat(TokenTy::Return, SyntaxError::InvalidExpr)?;
+    fn stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+        match self.peek() {
+            TokenTy::Semicolon => {
+                self.advance_unchecked();
+                Ok(Stmt::Nil)
+            },
+            TokenTy::Return => self.ret_stmt(),
+            _ => self.expr_stmt(),
+        }       
+    }
+
+    fn expr_stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
         let expr = self.expr()?;
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
+        Ok(Stmt::Expr(self.alloc_expr(expr)))
+    }
 
+    fn ret_stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+        self.advance_unchecked();
+        let expr = self.expr()?;
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
         Ok(Stmt::Return(self.alloc_expr(expr)))
     }
 
     #[inline]
-    fn expr(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        self.expr_with_precedence(0)
+    fn expr(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        self.expr_with_precedence(Precedence::None.up())
     }
 
-    fn expr_with_precedence(&mut self, prec: usize) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        let mut lhs = self.unary()?;
+    fn expr_with_precedence(
+        &mut self,
+        prec: Precedence,
+    ) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        let expr = self.prefix_expr()?;
 
-        while let Some((new_prec, op)) = self.peek().binary_prec()
-            && new_prec > prec
-        {
-            self.advance_unchecked();
-            let rhs = self.expr_with_precedence(new_prec)?;
-            let new_lhs = Expr::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs));
-            lhs = new_lhs;
-        }
-
-        Ok(lhs)
+        self.anyfix_expr(expr, prec)
     }
 
-    fn unary(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        match self.peek() {
-            TokenTy::Minus | TokenTy::Tilde | TokenTy::Bang => {
-                self.advance_unchecked();
-                let op = match self.prev.ty {
-                    TokenTy::Minus => UnaryOp::Negate,
-                    TokenTy::Tilde => UnaryOp::Compliment,
-                    TokenTy::Bang => UnaryOp::Not,
-                    _ => unreachable!(),
-                };
-                let operand = self.unary()?;
-                Ok(Expr::Unary(op, self.alloc_expr(operand)))
-            }
-            _ => self.literal(),
-        }
-    }
-
-    fn literal(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
-        let ty = self.advance()?;
-
-        match ty {
+    #[inline]
+    fn prefix_expr(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        match self.advance()? {
+            TokenTy::Minus | TokenTy::Tilde | TokenTy::Bang => self.unary(),
             TokenTy::Const => self.constant(),
-            TokenTy::OpenParen => {
-                let expr = self.expr()?;
-                self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
-                Ok(expr)
-            }
+            TokenTy::OpenParen => self.grouping(),
             _ => Err(self.error(SyntaxError::InvalidExpr)),
         }
     }
 
-    fn constant(&mut self) -> Result<Expr<'arena>, SyntaxErrorWithCtx> {
+    #[inline]
+    fn anyfix_expr(
+        &mut self,
+        mut expr: Expr<'src, 'a>,
+        old_prec: Precedence,
+    ) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        loop {
+            let new_prec = self.peek().anyfix_precedence();
+            if new_prec < old_prec {
+                return Ok(expr);
+            }
+            self.advance_unchecked();
+
+            expr = match new_prec {
+                Precedence::Assignment => self.assignment(expr)?,
+                Precedence::Postfix => todo!("postfix"),
+                new_prec => self.binary(expr, new_prec)?,
+            }
+        }
+    }
+
+    fn assignment(&mut self, lhs: Expr<'src, 'a>) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        let op = match self.prev.ty {
+            TokenTy::Equal => AssignOp::Eq,
+            TokenTy::PlusEqual => AssignOp::Add,
+            TokenTy::MinusEqual => AssignOp::Sub,
+            TokenTy::StarEqual => AssignOp::Mul,
+            TokenTy::SlashEqual => AssignOp::Div,
+            TokenTy::PercentEqual => AssignOp::Rem,
+            TokenTy::LessLessEqual => AssignOp::Shl,
+            TokenTy::GreaterGreaterEqual => AssignOp::Shr,
+            TokenTy::AmpersandEqual => AssignOp::And,
+            TokenTy::CaretEqual => AssignOp::Xor,
+            TokenTy::PipeEqual => AssignOp::Or,
+            _ => unreachable!("invalid tokenty {:?} reached assignment", self.prev.ty),
+        };
+        let rhs = self.expr_with_precedence(Precedence::Assignment)?;
+        Ok(Expr::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs)))
+    }
+
+    fn binary(
+        &mut self,
+        lhs: Expr<'src, 'a>,
+        prec: Precedence,
+    ) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        let op = match self.prev.ty {
+            TokenTy::Star => BinaryOp::Mul,
+            TokenTy::Slash => BinaryOp::Div,
+            TokenTy::Percent => BinaryOp::Rem,
+            // + -
+            TokenTy::Plus => BinaryOp::Add,
+            TokenTy::Minus => BinaryOp::Sub,
+            // >> <<
+            TokenTy::GreaterGreater => BinaryOp::Shr,
+            TokenTy::LessLess => BinaryOp::Shl,
+            // > >= < <=
+            TokenTy::Greater => BinaryOp::G,
+            TokenTy::GreaterEqual => BinaryOp::GE,
+            TokenTy::Less => BinaryOp::L,
+            TokenTy::LessEqual => BinaryOp::LE,
+            // == !=
+            TokenTy::EqualEqual => BinaryOp::E,
+            TokenTy::BangEqual => BinaryOp::NE,
+            // & ^ |
+            TokenTy::Ampersand => BinaryOp::BitAnd,
+            TokenTy::Caret => BinaryOp::BitXor,
+            TokenTy::Pipe => BinaryOp::BitOr,
+            // &&
+            TokenTy::AmpersandAmpersand => BinaryOp::And,
+            // ||
+            TokenTy::PipePipe => BinaryOp::Or,
+            _ => unreachable!("Unexpected TokenTy: {:?} made it to binary", self.prev.ty),
+        };
+
+        let rhs = self.expr_with_precedence(prec.up())?;
+        Ok(Expr::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs)))
+    }
+
+    fn unary(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        let op = match self.prev.ty {
+            TokenTy::Minus => UnaryOp::Negate,
+            TokenTy::Tilde => UnaryOp::Compliment,
+            TokenTy::Bang => UnaryOp::Not,
+            _ => unreachable!(),
+        };
+        let operand = self.expr_with_precedence(Precedence::Unary)?;
+        Ok(Expr::Unary(op, self.alloc_expr(operand)))
+    }
+
+    fn constant(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
         let cnst = self
             .get_src_str(&self.prev)
             .parse()
             .map_err(|_| self.error(SyntaxError::IntegerLiteralTooLarge))?;
 
         Ok(Expr::Constant(cnst))
+    }
+
+    fn grouping(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        let expr = self.expr()?;
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
+        Ok(expr)
     }
 }

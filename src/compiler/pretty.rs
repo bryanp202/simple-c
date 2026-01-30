@@ -34,7 +34,7 @@ impl PrettyPrint for ast::GlobalVar<'_> {
 
 impl<A: Allocator> PrettyPrint for ast::Function<'_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
-        let ast::Function { name, body } = self;
+        let ast::Function { name, body, .. } = self;
         let spaces = indent * INDENT_SPACES;
         writeln!(f, "{: >spaces$}Fn \"{}\": ", "", name.get())?;
         for stmt in body {
@@ -42,6 +42,25 @@ impl<A: Allocator> PrettyPrint for ast::Function<'_, A> {
             writeln!(f)?;
         }
         writeln!(f, "{: >spaces$}}},", "")
+    }
+}
+
+impl Display for ast::AssignOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let c = match self {
+            Self::Eq => "=",
+            Self::Add => "+=",
+            Self::Div => "/=",
+            Self::Mul => "*=",
+            Self::Rem => "%=",
+            Self::Sub => "-=",
+            Self::Shl => "<<=",
+            Self::Shr => ">>=",
+            Self::And => "&=",
+            Self::Xor => "^=",
+            Self::Or => "|=",
+        };
+        write!(f, "{c}")
     }
 }
 
@@ -82,39 +101,50 @@ impl Display for ast::UnaryOp {
     }
 }
 
-impl<A: Allocator> PrettyPrint for ast::Stmt<A> {
+impl<A: Allocator> PrettyPrint for ast::Stmt<'_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let spaces = indent * INDENT_SPACES;
         write!(f, "{: >spaces$}Stmt: ", "")?;
         match self {
+            Self::Expr(expr) => {
+                writeln!(f, "Expr {{ ")?;
+                expr.pretty(f, indent + 1)?;
+            }
+            Self::Nil => return write!(f, "Nil"),
             Self::Return(expr) => {
                 writeln!(f, "Return {{ ")?;
                 expr.pretty(f, indent + 1)?;
             }
         }
-        writeln!(f, "{: >spaces$}}},", "")
+        write!(f, "{: >spaces$}}},", "")
     }
 }
 
-impl<A: Allocator> PrettyPrint for ast::Expr<A> {
+impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let spaces = indent * INDENT_SPACES;
         write!(f, "{: >spaces$}Expr: ", "")?;
         match self {
+            Self::Assign(op, lhs, rhs) => {
+                writeln!(f, "Assign{op} {{")?;
+                lhs.pretty(f, indent + 1)?;
+                rhs.pretty(f, indent + 1)?;
+                writeln!(f, "{: >spaces$}}},", "")
+            }
             Self::Binary(op, lhs, rhs) => {
                 writeln!(f, "Binary{op} {{")?;
                 lhs.pretty(f, indent + 1)?;
                 rhs.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
             }
-            Self::Constant(imm) => {
-                writeln!(f, "Imm {imm},")
-            }
             Self::Unary(op, operand) => {
                 writeln!(f, "Unary{op} {{")?;
                 operand.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
             }
+            Self::Global(name) => write!(f, "Global {},", name.get()),
+            Self::Local(id) => write!(f, "Local {id},"),
+            Self::Constant(imm) => writeln!(f, "Imm {imm},"),
         }
     }
 }

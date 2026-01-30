@@ -56,6 +56,11 @@ impl Display for BuildError {
 
 #[derive(Debug)]
 pub enum CompileError {
+    IoError {
+        src_path: PathBuf,
+        err: std::io::Error,
+        msg: &'static str,
+    },
     PreprocessorError {
         src_path: PathBuf,
         err: String,
@@ -74,6 +79,10 @@ pub enum CompileError {
 impl Display for CompileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::IoError { src_path, err, msg } => {
+                write!(f, " --> {}", src_path.display())?;
+                write!(f, "io error [{err}]: {msg}")
+            }
             Self::PreprocessorError { src_path, err } => {
                 write!(f, " --> {}", src_path.display())?;
                 write!(f, "error: {err}")
@@ -119,6 +128,7 @@ pub struct ErrorWithCtx<E: Display> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SyntaxError {
     ExpectedFunctionArgs,
+    ExpectedIdentifier,
     ExpectedSemicolon,
     IntegerLiteralTooLarge,
     InvalidExpr,
@@ -132,6 +142,7 @@ impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::ExpectedFunctionArgs => "expected function args after function identifier",
+            Self::ExpectedIdentifier => "expected an identifier after function return type",
             Self::ExpectedSemicolon => "expected semicolon after statement",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidExpr => "invalid expression",

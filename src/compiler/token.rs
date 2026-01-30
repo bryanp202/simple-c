@@ -1,9 +1,6 @@
 use std::ops::Range;
 
-use crate::compiler::{
-    ast::BinaryOp,
-    error::{Context, SyntaxError},
-};
+use crate::compiler::error::{Context, SyntaxError};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TokenTy {
@@ -15,12 +12,17 @@ pub enum TokenTy {
     Typedef,
     Void,
     // Single character
-    CloseBrace,
-    CloseParen,
     OpenBrace,
+    CloseBrace,
     OpenParen,
+    CloseParen,
+    OpenSquare,
+    CloseSquare,
     Semicolon,
     Tilde,
+    Dot,
+    QuestionMark,
+    Colon,
     // Single or double
     Minus,
     MinusMinus,
@@ -59,51 +61,80 @@ pub enum TokenTy {
     Eof,
 }
 
-impl TokenTy {
-    /// The binary precedence of this tokenty and its binary op
-    ///
-    /// Returns none if not binary operator
-    pub fn binary_prec(self) -> Option<(usize, BinaryOp)> {
-        use TokenTy::*;
-        const PRODUCT: usize = 50;
-        const TERM: usize = 45;
-        const SHIFT: usize = 40;
-        const RELATIONAL: usize = 35;
-        const EQUALITY: usize = 30;
-        const BIT_AND: usize = 25;
-        const BIT_XOR: usize = 20;
-        const BIT_OR: usize = 15;
-        const LOGIC_AND: usize = 10;
-        const LOGIC_OR: usize = 5;
+#[repr(usize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Precedence {
+    None,
+    Conditional,
+    Assignment,
+    LogicOr,
+    LogicAnd,
+    BitOr,
+    BitXor,
+    BitAnd,
+    Equality,
+    Relational,
+    Shift,
+    Term,
+    Product,
+    Unary,
+    Postfix,
+    Primary,
+}
 
+impl Precedence {
+    pub const fn up(self) -> Self {
+        use Precedence::*;
         match self {
-            // * / %
-            Star => Some((PRODUCT, BinaryOp::Mul)),
-            Slash => Some((PRODUCT, BinaryOp::Div)),
-            Percent => Some((PRODUCT, BinaryOp::Rem)),
-            // + -
-            Plus => Some((TERM, BinaryOp::Add)),
-            Minus => Some((TERM, BinaryOp::Sub)),
-            // >> <<
-            GreaterGreater => Some((SHIFT, BinaryOp::Shr)),
-            LessLess => Some((SHIFT, BinaryOp::Shl)),
-            // > >= < <=
-            Greater => Some((RELATIONAL, BinaryOp::G)),
-            GreaterEqual => Some((RELATIONAL, BinaryOp::GE)),
-            Less => Some((RELATIONAL, BinaryOp::L)),
-            LessEqual => Some((RELATIONAL, BinaryOp::LE)),
-            // == !=
-            EqualEqual => Some((EQUALITY, BinaryOp::E)),
-            BangEqual => Some((EQUALITY, BinaryOp::NE)),
-            // & ^ |
-            Ampersand => Some((BIT_AND, BinaryOp::BitAnd)),
-            Caret => Some((BIT_XOR, BinaryOp::BitXor)),
-            Pipe => Some((BIT_OR, BinaryOp::BitOr)),
-            // &&
-            AmpersandAmpersand => Some((LOGIC_AND, BinaryOp::And)),
-            // ||
-            PipePipe => Some((LOGIC_OR, BinaryOp::Or)),
-            _ => None,
+            None => Conditional,
+            Conditional => Assignment,
+            Assignment => LogicOr,
+            LogicOr => LogicAnd,
+            LogicAnd => BitOr,
+            BitOr => BitXor,
+            BitXor => BitAnd,
+            BitAnd => Equality,
+            Equality => Relational,
+            Relational => Shift,
+            Shift => Term,
+            Term => Product,
+            Product => Unary,
+            Unary => Postfix,
+            Postfix => Primary,
+            Primary => Primary,
+        }
+    }
+}
+
+impl TokenTy {
+    pub const fn anyfix_precedence(self) -> Precedence {
+        match self {
+            TokenTy::Star | TokenTy::Slash | TokenTy::Percent => Precedence::Product,
+            TokenTy::Plus | TokenTy::Minus => Precedence::Term,
+            TokenTy::GreaterGreater | TokenTy::LessLess => Precedence::Shift,
+            TokenTy::GreaterEqual | TokenTy::Greater | TokenTy::LessEqual | TokenTy::Less => {
+                Precedence::Relational
+            }
+            TokenTy::EqualEqual | TokenTy::BangEqual => Precedence::Equality,
+            TokenTy::Ampersand => Precedence::BitAnd,
+            TokenTy::Caret => Precedence::BitXor,
+            TokenTy::Pipe => Precedence::BitOr,
+            TokenTy::AmpersandAmpersand => Precedence::LogicAnd,
+            TokenTy::PipePipe => Precedence::LogicOr,
+            TokenTy::Dot | TokenTy::OpenSquare | TokenTy::OpenParen => Precedence::Postfix,
+            TokenTy::QuestionMark => Precedence::Conditional,
+            TokenTy::Equal
+            | TokenTy::PlusEqual
+            | TokenTy::MinusEqual
+            | TokenTy::StarEqual
+            | TokenTy::SlashEqual
+            | TokenTy::PercentEqual
+            | TokenTy::LessLessEqual
+            | TokenTy::GreaterGreaterEqual
+            | TokenTy::AmpersandEqual
+            | TokenTy::CaretEqual
+            | TokenTy::PipeEqual => Precedence::Assignment,
+            _ => Precedence::None,
         }
     }
 }

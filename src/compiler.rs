@@ -1,5 +1,6 @@
 use std::{
     ffi::OsString,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -61,7 +62,7 @@ fn assemble(args: CompileArgs, asm_files: &[OsString]) -> Result<(), BuildError>
 
     if !output.status.success() {
         return Err(BuildError::AssemblerError(
-            String::from_utf8(output.stderr).expect("gcc fail message invalid utf8"),
+            String::from_utf8_lossy(&output.stderr).to_string(),
         ));
     }
 
@@ -82,7 +83,7 @@ fn build_unit(
     let temp_name = PathBuf::new().with_file_name(format!("_{module_num}"));
 
     let (src_path, i_path) = preprocess_unit(src_path, temp_name)?;
-    generate_unit(compile_flags, &src_path, &i_path)
+    generate_unit(compile_flags, src_path, &i_path)
 }
 
 fn preprocess_unit(
@@ -126,11 +127,20 @@ fn preprocess_unit(
 
 fn generate_unit(
     compile_flags: CompileFlags,
-    src_path: &Path,
+    src_path: PathBuf,
     i_path: &Path,
 ) -> Result<PathBuf, CompileError> {
-    let src = std::fs::read_to_string(i_path).expect("Preprocessor failed to output to temp name");
-    std::fs::remove_file(i_path).expect("Preprocessed source was removed early");
+    let src = match std::fs::read_to_string(&src_path) {
+        Ok(src) => src,
+        Err(err) => {
+            return Err(CompileError::IoError {
+                src_path,
+                err,
+                msg: "failed to open preprocessed source file",
+            });
+        }
+    };
+    _ = std::fs::remove_file(i_path);
 
     let asm_path = if compile_flags.emit_asm {
         src_path.with_extension("s")
@@ -144,25 +154,38 @@ fn generate_unit(
     // Parse into an ast
     let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path.to_path_buf())?;
     if compile_flags.show_pretty_ast {
-        eprintln!("{}: {ast_tree}", src_path.display());
+        let mut buf = BufWriter::new(std::io::stderr());
+        write!(&mut buf, "{}: {ast_tree}", src_path.display()).unwrap_or_else(|err| {
+            eprintln!("{err}: failed to print ast for: {}", src_path.display())
+        });
     }
 
     // Convert into a three address code IR
     let tacky_program = TackyConverter::new().convert(ast_tree);
     if compile_flags.show_pretty_tacky {
-        eprintln!("{}: {tacky_program}", src_path.display());
+        let mut buf = BufWriter::new(std::io::stderr());
+        write!(&mut buf, "{}: {tacky_program}", src_path.display()).unwrap_or_else(|err| {
+            eprintln!("{err}: failed to print tacky for: {}", src_path.display())
+        });
     }
 
     // Convert into x86_64 asm IR
     let asm_program = AsmConverter::new().convert(tacky_program);
     if compile_flags.show_pretty_asm {
-        eprintln!("{}:", src_path.display());
-        eprintln!("{asm_program}");
+        let mut buf = BufWriter::new(std::io::stderr());
+        write!(&mut buf, "{}: {asm_program}", src_path.display()).unwrap_or_else(|err| {
+            eprintln!("{err}: failed to print asm for: {}", src_path.display())
+        });
     }
 
+    // Output x86_64 asm to file
     asm_program
         .generate(&asm_path)
-        .expect("Failed to write to file");
+        .map_err(|err| CompileError::IoError {
+            src_path,
+            err,
+            msg: "failed to write asm to file",
+        })?;
 
     Ok(asm_path)
 }

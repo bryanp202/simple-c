@@ -8,7 +8,7 @@ use crate::{
 pub enum Item<'src, A: Allocator = Global> {
     Fn {
         name: Interned<'src, str>,
-        body: Vec<Stmt<A>>,
+        body: Vec<Stmt<'src, A>>,
     },
 }
 
@@ -23,28 +23,33 @@ pub struct GlobalVar<'src> {
 
 pub struct Function<'src, A: Allocator = Global> {
     pub(crate) name: Interned<'src, str>,
-    pub(crate) body: Vec<Stmt<A>>,
+    pub(crate) body: Vec<Stmt<'src, A>>,
+    pub(crate) local_count: usize,
 }
 
-pub enum Stmt<A: Allocator = Global> {
-    Return(Box<Expr<A>, A>),
+pub enum Stmt<'src, A: Allocator = Global> {
+    Expr(Box<Expr<'src, A>, A>),
+    Nil,
+    Return(Box<Expr<'src, A>, A>),
 }
 
-#[derive(PartialEq, Eq, Hash)]
-pub enum Expr<A: Allocator> {
+pub enum Expr<'src, A: Allocator> {
+    Assign(AssignOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
+    Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
+    Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand
+    Global(Interned<'src, str>),
+    Local(usize),
     Constant(i32),
-    Unary(UnaryOp, Box<Expr<A>, A>),                    // Op, operand
-    Binary(BinaryOp, Box<Expr<A>, A>, Box<Expr<A>, A>), // Op, lhs, rhs
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub enum UnaryOp {
     Compliment,
     Negate,
     Not,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub enum BinaryOp {
     Div,
     Mul,
@@ -63,6 +68,21 @@ pub enum BinaryOp {
     BitXor,
     BitOr,
     And,
+    Or,
+}
+
+#[derive(Clone, Copy)]
+pub enum AssignOp {
+    Eq,
+    Div,
+    Mul,
+    Rem,
+    Add,
+    Sub,
+    Shl,
+    Shr,
+    And,
+    Xor,
     Or,
 }
 
@@ -103,12 +123,19 @@ impl TackyConverter {
 }
 
 impl<'src> TackyConverter {
+    #[inline]
+    fn reset_for_fn(&mut self, local_count: usize) {
+        self.temp_count = local_count;
+    }
+
+    #[inline]
     fn new_temp(&mut self) -> tacky::Val<'src> {
         let temp = self.temp_count;
         self.temp_count += 1;
         tacky::Val::Temp(temp)
     }
 
+    #[inline]
     fn new_label(&mut self) -> Label {
         let label = self.label_count;
         self.label_count += 1;
@@ -121,7 +148,8 @@ impl<'src> TackyConverter {
     }
 
     fn function(&mut self, fun: Function<'src, impl Allocator>) -> tacky::Function<'src> {
-        let Function { name, body } = fun;
+        let Function { name, body, local_count } = fun;
+        self.reset_for_fn(local_count);
         let mut insts = Vec::new();
 
         for stmt in body {
@@ -131,8 +159,10 @@ impl<'src> TackyConverter {
         tacky::Function { name, insts }
     }
 
-    fn stmt(&mut self, stmt: Stmt<impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) {
+    fn stmt(&mut self, stmt: Stmt<'src, impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) {
         match stmt {
+            Stmt::Expr(expr) => _ = self.expr(*expr, insts),
+            Stmt::Nil => {}, // Do nothing
             Stmt::Return(expr) => {
                 let src = self.expr(*expr, insts);
                 insts.push(tacky::Inst::Ret(src));
@@ -142,21 +172,57 @@ impl<'src> TackyConverter {
 
     fn expr(
         &mut self,
-        expr: Expr<impl Allocator>,
+        expr: Expr<'src, impl Allocator>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         match expr {
-            Expr::Constant(imm) => tacky::Val::Const(imm),
-            Expr::Unary(op, expr) => self.unary(op, *expr, insts),
+            Expr::Assign(op, lhs, rhs) => self.assign(op, *lhs, *rhs, insts),
             Expr::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
+            Expr::Unary(op, expr) => self.unary(op, *expr, insts),
+            Expr::Global(name) => tacky::Val::GlobalVar(name),
+            Expr::Local(id) => tacky::Val::Temp(id),
+            Expr::Constant(imm) => tacky::Val::Const(imm),
         }
+    }
+
+    fn assign<A: Allocator>(
+        &mut self,
+        ast_op: AssignOp,
+        lhs: Expr<'src, A>,
+        rhs: Expr<'src, A>,
+        insts: &mut Vec<tacky::Inst<'src>>,
+    ) -> tacky::Val<'src> {
+        let rhs = self.expr(rhs, insts);
+        let lhs = self.expr(lhs, insts);
+
+        let op = match ast_op {
+            AssignOp::Div => tacky::BinaryOp::Div,
+            AssignOp::Mul => tacky::BinaryOp::Mul,
+            AssignOp::Rem => tacky::BinaryOp::Rem,
+            AssignOp::Add => tacky::BinaryOp::Add,
+            AssignOp::Sub => tacky::BinaryOp::Sub,
+            AssignOp::Shl => tacky::BinaryOp::Shl,
+            AssignOp::Shr => tacky::BinaryOp::Sar,
+            AssignOp::And => tacky::BinaryOp::BitAnd,
+            AssignOp::Or => tacky::BinaryOp::BitOr,
+            AssignOp::Xor => tacky::BinaryOp::BitXor,
+            AssignOp::Eq => {
+                insts.push(tacky::Inst::Copy { src: rhs , dst: lhs });
+                return lhs;
+            },
+        };
+        let dst = self.new_temp();
+        // Add intermediary binary op for compound assigns
+        insts.push(tacky::Inst::Binary { op, lhs, rhs, dst });
+        insts.push(tacky::Inst::Copy { src: dst, dst: lhs });
+        dst
     }
 
     fn binary<A: Allocator>(
         &mut self,
         ast_op: BinaryOp,
-        lhs: Expr<A>,
-        rhs: Expr<A>,
+        lhs: Expr<'src, A>,
+        rhs: Expr<'src, A>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         match ast_op {
@@ -253,7 +319,7 @@ impl<'src> TackyConverter {
     fn unary(
         &mut self,
         ast_op: UnaryOp,
-        expr: Expr<impl Allocator>,
+        expr: Expr<'src, impl Allocator>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         let op = match ast_op {

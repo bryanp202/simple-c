@@ -3,7 +3,10 @@
 #![feature(hash_set_entry)]
 
 use clap::Parser;
-use std::process::ExitCode;
+use std::{
+    io::{BufWriter, Write},
+    process::ExitCode,
+};
 
 use crate::compiler::compile;
 
@@ -58,7 +61,11 @@ fn main() -> ExitCode {
     let args = CompileArgs::parse();
     let exit_code = match compile(args) {
         Err(build_err) => {
-            eprint!("{build_err}");
+            let mut buf = BufWriter::new(std::io::stderr());
+            match write!(buf, "{build_err}") {
+                Err(err) => eprintln!("failed to print build err: {err}"),
+                Ok(()) => {}
+            }
             ExitCode::FAILURE
         }
         Ok(()) => ExitCode::SUCCESS,

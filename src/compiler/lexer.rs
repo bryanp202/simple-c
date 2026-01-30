@@ -32,12 +32,17 @@ impl<'src> Lexer<'src> {
 
         let ty = match c {
             // Single
-            ';' => TokenTy::Semicolon,
             '(' => TokenTy::OpenParen,
             ')' => TokenTy::CloseParen,
             '{' => TokenTy::OpenBrace,
             '}' => TokenTy::CloseBrace,
+            '[' => TokenTy::OpenSquare,
+            ']' => TokenTy::CloseSquare,
+            '.' => TokenTy::Dot,
             '~' => TokenTy::Tilde,
+            ';' => TokenTy::Semicolon,
+            ':' => TokenTy::Colon,
+            '?' => TokenTy::QuestionMark,
 
             // Single or double
             // Arith

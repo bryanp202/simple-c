@@ -245,7 +245,7 @@ impl<'src> AsmConverter {
                     BinaryOp::LE => CompareOp::LE,
                     _ => unreachable!(),
                 };
-                asm_insts.push(asm::Inst::Cmp(lhs, rhs));
+                asm_insts.push(asm::Inst::Cmp(rhs, lhs));
                 asm_insts.push(asm::Inst::Mov(Operand::Imm(0), dst));
                 asm::Inst::SetCC(compare_op, dst)
             }
