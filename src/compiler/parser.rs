@@ -294,7 +294,7 @@ impl<'src, 'a> Parser<'src, 'a> {
     fn block(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
         self.advance_unchecked();
 
-        let types_old_top = self.types.enter_scope();
+        let old_scope_bottom = self.types.enter_scope();
         let mut stmts = Vec::new();
 
         while !self.at_end() && !self.check(TokenTy::CloseBrace) {
@@ -304,7 +304,7 @@ impl<'src, 'a> Parser<'src, 'a> {
         }
         self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter)?;
 
-        self.types.exit_scope(types_old_top);
+        self.types.exit_scope(old_scope_bottom);
         Ok(Stmt::Block(stmts))
     }
 

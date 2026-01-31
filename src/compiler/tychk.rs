@@ -114,17 +114,17 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     ) -> Result<(), SemanticErrorWithCtx> {
         match stmt {
             Stmt::Block(sub_stmts) => {
-                let types_old_top = self.var_map.enter_scope();
+                let old_scope_bottom = self.var_map.enter_scope();
                 for sub_stmt in sub_stmts {
                     self.resolve_stmt(sub_stmt, stmts)?;
                 }
-                self.var_map.exit_scope(types_old_top);
+                self.var_map.exit_scope(old_scope_bottom);
             }
             Stmt::Expr(expr) => {
                 stmts.push(Stmt::Expr(self.resolve_expr(expr)?));
             }
             Stmt::Decl(name, ty, init) => {
-                if let Some(_) = self.var_map.get(name) {
+                if self.var_map.in_scope(name) {
                     return Err(Self::error(SemanticError::DuplicateDecl));
                 }
 

@@ -44,25 +44,33 @@ pub fn built_in_types<'src, 'a>(
 
 pub struct ScopeStack<K: PartialEq + Eq, V> {
     stack: Vec<(K, V)>,
+    scope_bottom: usize,
 }
 
 impl<K: PartialEq + Eq, V> ScopeStack<K, V> {
     pub fn new() -> Self {
-        Self { stack: Vec::new() }
+        Self { stack: Vec::new(), scope_bottom: 0 }
     }
 
     /// Returns a value later used to reset the scope
-    pub fn enter_scope(&self) -> usize {
-        self.stack.len()
+    pub fn enter_scope(&mut self) -> usize {
+        let old_scope_bottom = self.scope_bottom;
+        self.scope_bottom = self.stack.len();
+        old_scope_bottom
     }
 
     /// Takes in the value from enter scope and clears necessary (str, ty) pairs
-    pub fn exit_scope(&mut self, top: usize) {
-        self.stack.drain(top..);
+    pub fn exit_scope(&mut self, old_scope_bottom: usize) {
+        self.stack.drain(self.scope_bottom..);
+        self.scope_bottom = old_scope_bottom;
     }
 
     pub fn push(&mut self, key: K, item: V) {
         self.stack.push((key, item));
+    }
+
+    pub fn in_scope(&self, key: K) -> bool {
+        self.stack[self.scope_bottom..].iter().any(|(k, _)| *k == key)
     }
 
     pub fn get(&self, key: K) -> Option<&V> {
