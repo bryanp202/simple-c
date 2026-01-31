@@ -106,8 +106,11 @@ impl Display for ast::UnaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let c = match self {
             Self::Compliment => "~",
+            Self::Plus => "+",
             Self::Negate => "-",
             Self::Not => "!",
+            Self::Increment => "++",
+            Self::Decrement => "--",
         };
         write!(f, "{c}")
     }
@@ -163,6 +166,11 @@ impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
             }
             Self::Unary(op, operand) => {
                 writeln!(f, "Unary{op} {{")?;
+                operand.pretty(f, indent + 1)?;
+                writeln!(f, "{: >spaces$}}},", "")
+            }
+            Self::DecInc(op, operand) => {
+                writeln!(f, "Dec/Inc{op} {{")?;
                 operand.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
             }

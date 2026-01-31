@@ -338,7 +338,12 @@ impl<'src, 'a> Parser<'src, 'a> {
     #[inline]
     fn prefix_expr(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
         match self.advance()? {
-            TokenTy::Minus | TokenTy::Tilde | TokenTy::Bang => self.unary(),
+            TokenTy::PlusPlus
+            | TokenTy::MinusMinus
+            | TokenTy::Plus
+            | TokenTy::Minus
+            | TokenTy::Tilde
+            | TokenTy::Bang => self.unary(),
             TokenTy::Const => self.constant(),
             TokenTy::Identifier => self.ident(),
             TokenTy::OpenParen => self.grouping(),
@@ -361,7 +366,7 @@ impl<'src, 'a> Parser<'src, 'a> {
 
             expr = match new_prec {
                 Precedence::Assignment => self.assignment(expr)?,
-                Precedence::Postfix => todo!("postfix"),
+                Precedence::Postfix => self.postfix(expr)?,
                 new_prec => self.binary(expr, new_prec)?,
             }
         }
@@ -426,13 +431,24 @@ impl<'src, 'a> Parser<'src, 'a> {
 
     fn unary(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
         let op = match self.prev.ty {
+            TokenTy::Plus => UnaryOp::Plus,
             TokenTy::Minus => UnaryOp::Negate,
             TokenTy::Tilde => UnaryOp::Compliment,
             TokenTy::Bang => UnaryOp::Not,
+            TokenTy::PlusPlus => UnaryOp::Increment,
+            TokenTy::MinusMinus => UnaryOp::Decrement,
             _ => unreachable!(),
         };
         let operand = self.expr_with_precedence(Precedence::Unary)?;
         Ok(Expr::Unary(op, self.alloc_expr(operand)))
+    }
+
+    fn postfix(&mut self, operand: Expr<'src, 'a>) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        match self.prev.ty {
+            TokenTy::PlusPlus => Ok(Expr::DecInc(UnaryOp::Increment, self.alloc_expr(operand))),
+            TokenTy::Minus => Ok(Expr::DecInc(UnaryOp::Decrement, self.alloc_expr(operand))),
+            _ => unreachable!(),
+        }
     }
 
     fn constant(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {

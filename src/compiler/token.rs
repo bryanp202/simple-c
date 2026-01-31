@@ -109,6 +109,7 @@ impl Precedence {
 impl TokenTy {
     pub const fn anyfix_precedence(self) -> Precedence {
         match self {
+            TokenTy::PlusPlus | TokenTy::MinusMinus => Precedence::Postfix,
             TokenTy::Star | TokenTy::Slash | TokenTy::Percent => Precedence::Product,
             TokenTy::Plus | TokenTy::Minus => Precedence::Term,
             TokenTy::GreaterGreater | TokenTy::LessLess => Precedence::Shift,

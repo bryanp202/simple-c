@@ -49,7 +49,10 @@ pub struct ScopeStack<K: PartialEq + Eq, V> {
 
 impl<K: PartialEq + Eq, V> ScopeStack<K, V> {
     pub fn new() -> Self {
-        Self { stack: Vec::new(), scope_bottom: 0 }
+        Self {
+            stack: Vec::new(),
+            scope_bottom: 0,
+        }
     }
 
     /// Returns a value later used to reset the scope
@@ -70,7 +73,9 @@ impl<K: PartialEq + Eq, V> ScopeStack<K, V> {
     }
 
     pub fn in_scope(&self, key: K) -> bool {
-        self.stack[self.scope_bottom..].iter().any(|(k, _)| *k == key)
+        self.stack[self.scope_bottom..]
+            .iter()
+            .any(|(k, _)| *k == key)
     }
 
     pub fn get(&self, key: K) -> Option<&V> {

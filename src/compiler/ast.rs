@@ -43,6 +43,7 @@ pub enum Expr<'src, A: Allocator> {
     Assign(AssignOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand
+    DecInc(UnaryOp, Box<Expr<'src, A>, A>),                         // Op, operand (op is either ++ or --)
     Global(Interned<'src, str>),
     Var(Interned<'src, str>),
     Local(usize),
@@ -51,9 +52,12 @@ pub enum Expr<'src, A: Allocator> {
 
 #[derive(Clone, Copy)]
 pub enum UnaryOp {
+    Increment,
+    Decrement,
     Compliment,
     Negate,
     Not,
+    Plus,
 }
 
 #[derive(Clone, Copy)]
@@ -216,6 +220,7 @@ impl<'src, 'ty> TackyConverter {
             Expr::Assign(op, lhs, rhs) => self.assign(op, *lhs, *rhs, insts),
             Expr::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
             Expr::Unary(op, expr) => self.unary(op, *expr, insts),
+            Expr::DecInc(op, expr) => self.dec_inc(op, *expr, insts),
             Expr::Global(name) => tacky::Val::GlobalVar(name),
             Expr::Local(id) => tacky::Val::Temp(id),
             Expr::Constant(imm) => tacky::Val::Const(imm),
@@ -364,10 +369,30 @@ impl<'src, 'ty> TackyConverter {
             UnaryOp::Compliment => tacky::UnaryOp::Compliment,
             UnaryOp::Negate => tacky::UnaryOp::Negate,
             UnaryOp::Not => tacky::UnaryOp::Not,
+            UnaryOp::Decrement => {
+                return self.assign(AssignOp::Sub, expr, Expr::Constant(1), insts);
+            }
+            UnaryOp::Increment => {
+                return self.assign(AssignOp::Add, expr, Expr::Constant(1), insts);
+            }
+            UnaryOp::Plus => return self.expr(expr, insts),
         };
         let src = self.expr(expr, insts);
         let dst = self.new_temp();
         insts.push(tacky::Inst::Unary { op, src, dst });
+        dst
+    }
+
+    fn dec_inc(&mut self, ast_op: UnaryOp, expr: Expr<'src, impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) -> tacky::Val<'src> {
+        let operand = self.expr(expr, insts);
+        let op = match ast_op {
+            UnaryOp::Decrement => tacky::BinaryOp::Sub,
+            UnaryOp::Increment => tacky::BinaryOp::Add,
+            _ => unreachable!("Reached non dec/inc op {ast_op}"),
+        };
+        let dst = self.new_temp();
+        insts.push(tacky::Inst::Copy { src: operand, dst });
+        insts.push(tacky::Inst::Binary { op, lhs: operand, rhs: tacky::Val::Const(1), dst: operand });
         dst
     }
 }

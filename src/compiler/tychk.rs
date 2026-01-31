@@ -3,9 +3,7 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, GlobalVar},
-        error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
-        ty::{ScopeStack, Ty},
+        ast::{self, GlobalVar, UnaryOp}, error::{CompileError, Context, SemanticError, SemanticErrorWithCtx}, ty::{ScopeStack, Ty}
     },
     intern::Interned,
 };
@@ -109,7 +107,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 
     fn resolve_stmt(
         &mut self,
-        stmt: Stmt<'src, 'a>,
+        mut stmt: Stmt<'src, 'a>,
         stmts: &mut Vec<Stmt<'src, 'a>>,
     ) -> Result<(), SemanticErrorWithCtx> {
         match stmt {
@@ -119,11 +117,10 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     self.resolve_stmt(sub_stmt, stmts)?;
                 }
                 self.var_map.exit_scope(old_scope_bottom);
+                return Ok(());
             }
-            Stmt::Expr(expr) => {
-                stmts.push(Stmt::Expr(self.resolve_expr(expr)?));
-            }
-            Stmt::Decl(name, ty, init) => {
+            Stmt::Expr(ref mut expr) => self.resolve_expr(expr)?,
+            Stmt::Decl(name, ty, ref mut init) => {
                 if self.var_map.in_scope(name) {
                     return Err(Self::error(SemanticError::DuplicateDecl));
                 }
@@ -139,41 +136,40 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     },
                 );
 
-                let init = if let Some(expr) = init {
-                    Some(self.resolve_expr(expr)?)
-                } else {
-                    init
-                };
-                stmts.push(Stmt::Decl(name, ty, init));
+                if let Some(expr) = init {
+                    self.resolve_expr(expr)?;
+                }
             }
             Stmt::Nil => {}
-            Stmt::Return(expr) => stmts.push(Stmt::Return(self.resolve_expr(expr)?)),
+            Stmt::Return(ref mut expr) => self.resolve_expr(expr)?,
         }
+
+        stmts.push(stmt);
 
         Ok(())
     }
 
     fn resolve_expr(
         &mut self,
-        mut expr: Box<Expr<'src, 'a>, Alloc<'a>>,
-    ) -> Result<Box<Expr<'src, 'a>, Alloc<'a>>, SemanticErrorWithCtx> {
-        match *expr {
-            Expr::Assign(_, lhs, _) if !matches!(*lhs, Expr::Var(_)) => {
+        expr: &mut Expr<'src, 'a>,
+    ) -> Result<(), SemanticErrorWithCtx> {
+        match expr {
+            Expr::Assign(_, lhs, _) if !Self::is_lvalue(&lhs) => {
                 Err(Self::error(SemanticError::InvalidLValue))
             }
-            Expr::Assign(op, lhs, rhs) => {
-                *expr = Expr::Assign(op, self.resolve_expr(lhs)?, self.resolve_expr(rhs)?);
-                Ok(expr)
-            }
-            Expr::Binary(op, lhs, rhs) => {
-                *expr = Expr::Binary(op, self.resolve_expr(lhs)?, self.resolve_expr(rhs)?);
-                Ok(expr)
-            }
+            Expr::Assign(_, lhs, rhs) => self.resolve_exprs(lhs, rhs),
+            Expr::Binary(_, lhs, rhs) => self.resolve_exprs(lhs, rhs),
             Expr::Unary(op, operand) => {
-                *expr = Expr::Unary(op, self.resolve_expr(operand)?);
-                Ok(expr)
+                match op {
+                    UnaryOp::Decrement | UnaryOp::Increment if !Self::is_lvalue(&operand) => Err(Self::error(SemanticError::InvalidLValue)),
+                    _ => self.resolve_expr(operand)
+                }
             }
-            Expr::Var(name) => match self.var_map.get(name) {
+            Expr::DecInc(_, operand) if !Self::is_lvalue(operand) => {
+                Err(Self::error(SemanticError::InvalidLValue))
+            }
+            Expr::DecInc(_, operand) => self.resolve_expr(operand),
+            Expr::Var(name) => match self.var_map.get(*name) {
                 None => Err(Self::error(SemanticError::UndeclaredVar)),
                 Some(SymbolInfo {
                     attributes:
@@ -182,8 +178,8 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                         },
                     ..
                 }) => {
-                    *expr = Expr::Global(name);
-                    Ok(expr)
+                    *expr = Expr::Global(*name);
+                    Ok(())
                 }
                 Some(SymbolInfo {
                     attributes:
@@ -193,10 +189,19 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     ..
                 }) => {
                     *expr = Expr::Local(*id);
-                    Ok(expr)
+                    Ok(())
                 }
             },
-            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) => Ok(expr),
+            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) => Ok(()),
         }
+    }
+
+    fn resolve_exprs(&mut self, lhs: &mut Expr<'src, 'a>, rhs: &mut Expr<'src, 'a>) -> Result<(), SemanticErrorWithCtx> {
+        self.resolve_expr(lhs)?;
+        self.resolve_expr(rhs)
+    }
+
+    fn is_lvalue(expr: &Expr<'src, 'a>) -> bool {
+        matches!(expr, &Expr::Var(_))
     }
 }
