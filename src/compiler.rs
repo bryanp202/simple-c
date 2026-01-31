@@ -15,7 +15,8 @@ use crate::{
         parser::Parser,
         pretty::pretty_print,
         tacky::AsmConverter,
-        ty::built_in_types, tychk::TyChecker,
+        ty::built_in_types,
+        tychk::TyChecker,
     },
     intern::{InternedArena, Interner},
 };

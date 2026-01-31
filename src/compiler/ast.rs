@@ -176,6 +176,8 @@ impl<'src, 'ty> TackyConverter {
         for stmt in body {
             self.stmt(stmt, &mut insts);
         }
+        // Add catch all null(0) return
+        insts.push(tacky::Inst::Ret(tacky::Val::Const(0)));
 
         tacky::Function { name, insts }
     }

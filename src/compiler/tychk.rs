@@ -146,7 +146,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 };
                 stmts.push(Stmt::Decl(name, ty, init));
             }
-            Stmt::Nil => {},
+            Stmt::Nil => {}
             Stmt::Return(expr) => stmts.push(Stmt::Return(self.resolve_expr(expr)?)),
         }
 
