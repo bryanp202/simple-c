@@ -88,13 +88,13 @@ impl<'a, T: Eq + Hash> Interner<'a, T> {
     }
 }
 
-pub struct InternedArena<'a, T: Eq + Hash> {
-    arena: &'a TypedArena<'a, T>,
+pub struct InternedArena<'a, 'b, T: Eq + Hash> {
+    arena: &'a TypedArena<'b, T>,
     interner: Interner<'a, T>,
 }
 
-impl<'a, T: Eq + Hash> InternedArena<'a, T> {
-    pub fn new(arena: &'a TypedArena<'a, T>) -> Self {
+impl<'a, 'b, T: Eq + Hash> InternedArena<'a, 'b, T> {
+    pub fn new(arena: &'a TypedArena<'b, T>) -> Self {
         Self {
             arena,
             interner: Interner::new(),

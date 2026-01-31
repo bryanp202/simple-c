@@ -1,19 +1,19 @@
 use std::alloc::{Allocator, Global};
 
 use crate::{
-    compiler::{asm::Label, tacky},
+    compiler::{asm::Label, tacky, ty::Ty},
     intern::Interned,
 };
 
-pub enum Item<'src, A: Allocator = Global> {
+pub enum Item<'src, 'ty, A: Allocator = Global> {
     Fn {
         name: Interned<'src, str>,
-        body: Vec<Stmt<'src, A>>,
+        body: Vec<Stmt<'src, 'ty, A>>,
     },
 }
 
-pub struct Program<'src, A: Allocator = Global> {
-    pub(crate) functions: Vec<Function<'src, A>>,
+pub struct Program<'src, 'ty, A: Allocator = Global> {
+    pub(crate) functions: Vec<Function<'src, 'ty, A>>,
     pub(crate) globals: Vec<GlobalVar<'src>>,
 }
 
@@ -21,13 +21,19 @@ pub struct GlobalVar<'src> {
     pub(crate) name: Interned<'src, str>,
 }
 
-pub struct Function<'src, A: Allocator = Global> {
+pub struct Function<'src, 'ty, A: Allocator = Global> {
     pub(crate) name: Interned<'src, str>,
-    pub(crate) body: Vec<Stmt<'src, A>>,
+    pub(crate) body: Vec<Stmt<'src, 'ty, A>>,
     pub(crate) local_count: usize,
 }
 
-pub enum Stmt<'src, A: Allocator = Global> {
+pub enum Stmt<'src, 'ty, A: Allocator = Global> {
+    Block(Vec<Stmt<'src, 'ty, A>>),
+    Decl(
+        Interned<'src, str>,
+        Interned<'ty, Ty<'src, 'ty>>,
+        Option<Box<Expr<'src, A>, A>>,
+    ),
     Expr(Box<Expr<'src, A>, A>),
     Nil,
     Return(Box<Expr<'src, A>, A>),
@@ -38,6 +44,7 @@ pub enum Expr<'src, A: Allocator> {
     Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand
     Global(Interned<'src, str>),
+    Var(Interned<'src, str>),
     Local(usize),
     Constant(i32),
 }
@@ -89,6 +96,7 @@ pub enum AssignOp {
 pub struct TackyConverter {
     temp_count: usize,
     label_count: usize,
+    curr_local: usize,
 }
 
 impl Default for TackyConverter {
@@ -102,12 +110,13 @@ impl TackyConverter {
         Self {
             temp_count: 0,
             label_count: 0,
+            curr_local: 0,
         }
     }
 
-    pub fn convert<'src, A: Allocator>(
+    pub fn convert<'src, 'ty, A: Allocator>(
         &mut self,
-        program: Program<'src, A>,
+        program: Program<'src, 'ty, A>,
     ) -> tacky::Program<'src> {
         let Program { globals, functions } = program;
         let globals = globals
@@ -122,10 +131,18 @@ impl TackyConverter {
     }
 }
 
-impl<'src> TackyConverter {
+impl<'src, 'ty> TackyConverter {
     #[inline]
     fn reset_for_fn(&mut self, local_count: usize) {
         self.temp_count = local_count;
+        self.curr_local = 0;
+    }
+
+    #[inline]
+    fn new_local(&mut self) -> tacky::Val<'src> {
+        let local = self.curr_local;
+        self.curr_local += 1;
+        tacky::Val::Temp(local)
     }
 
     #[inline]
@@ -147,8 +164,12 @@ impl<'src> TackyConverter {
         tacky::GlobalVar { name }
     }
 
-    fn function(&mut self, fun: Function<'src, impl Allocator>) -> tacky::Function<'src> {
-        let Function { name, body, local_count } = fun;
+    fn function(&mut self, fun: Function<'src, 'ty, impl Allocator>) -> tacky::Function<'src> {
+        let Function {
+            name,
+            body,
+            local_count,
+        } = fun;
         self.reset_for_fn(local_count);
         let mut insts = Vec::new();
 
@@ -159,10 +180,24 @@ impl<'src> TackyConverter {
         tacky::Function { name, insts }
     }
 
-    fn stmt(&mut self, stmt: Stmt<'src, impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) {
+    fn stmt(&mut self, stmt: Stmt<'src, 'ty, impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) {
         match stmt {
+            Stmt::Block(stmts) => {
+                for stmt in stmts {
+                    self.stmt(stmt, insts);
+                }
+            }
+            Stmt::Decl(_, _, init) => {
+                if let Some(init) = init {
+                    let src = self.expr(*init, insts);
+                    insts.push(tacky::Inst::Copy {
+                        src,
+                        dst: self.new_local(),
+                    });
+                }
+            }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
-            Stmt::Nil => {}, // Do nothing
+            Stmt::Nil => {} // Do nothing
             Stmt::Return(expr) => {
                 let src = self.expr(*expr, insts);
                 insts.push(tacky::Inst::Ret(src));
@@ -182,6 +217,7 @@ impl<'src> TackyConverter {
             Expr::Global(name) => tacky::Val::GlobalVar(name),
             Expr::Local(id) => tacky::Val::Temp(id),
             Expr::Constant(imm) => tacky::Val::Const(imm),
+            Expr::Var(_) => unreachable!("Var expr node not resolve"),
         }
     }
 
@@ -207,9 +243,9 @@ impl<'src> TackyConverter {
             AssignOp::Or => tacky::BinaryOp::BitOr,
             AssignOp::Xor => tacky::BinaryOp::BitXor,
             AssignOp::Eq => {
-                insts.push(tacky::Inst::Copy { src: rhs , dst: lhs });
+                insts.push(tacky::Inst::Copy { src: rhs, dst: lhs });
                 return lhs;
-            },
+            }
         };
         let dst = self.new_temp();
         // Add intermediary binary op for compound assigns

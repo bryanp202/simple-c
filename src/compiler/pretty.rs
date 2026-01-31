@@ -1,4 +1,9 @@
-use std::{alloc::Allocator, fmt::Display};
+use std::{
+    alloc::Allocator,
+    fmt::Display,
+    io::{BufWriter, Write},
+    path::Path,
+};
 
 use crate::compiler::{ast, tacky};
 
@@ -8,10 +13,17 @@ pub trait PrettyPrint {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result;
 }
 
+pub fn pretty_print(item: impl Display, name: &'static str, src_path: &Path) {
+    let mut buf = BufWriter::new(std::io::stderr());
+    write!(&mut buf, "{}: {item}", src_path.display()).unwrap_or_else(|err| {
+        eprintln!("{err}: failed to print {name} for: {}", src_path.display())
+    });
+}
+
 ////////////////////////
 /// AST PRETTY PRINT ///
 ////////////////////////
-impl<A: Allocator> Display for ast::Program<'_, A> {
+impl<A: Allocator> Display for ast::Program<'_, '_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Program [")?;
         for global in &self.globals {
@@ -32,7 +44,7 @@ impl PrettyPrint for ast::GlobalVar<'_> {
     }
 }
 
-impl<A: Allocator> PrettyPrint for ast::Function<'_, A> {
+impl<A: Allocator> PrettyPrint for ast::Function<'_, '_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let ast::Function { name, body, .. } = self;
         let spaces = indent * INDENT_SPACES;
@@ -101,11 +113,23 @@ impl Display for ast::UnaryOp {
     }
 }
 
-impl<A: Allocator> PrettyPrint for ast::Stmt<'_, A> {
+impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let spaces = indent * INDENT_SPACES;
         write!(f, "{: >spaces$}Stmt: ", "")?;
         match self {
+            Self::Block(stmts) => {
+                writeln!(f, "Block {{")?;
+                for stmt in stmts {
+                    stmt.pretty(f, indent + 1)?;
+                }
+            }
+            Self::Decl(name, ty, init) => {
+                writeln!(f, "Decl {} {} {{", ty.get(), name.get())?;
+                if let Some(init) = init {
+                    init.pretty(f, indent + 1)?;
+                }
+            }
             Self::Expr(expr) => {
                 writeln!(f, "Expr {{ ")?;
                 expr.pretty(f, indent + 1)?;
@@ -144,6 +168,7 @@ impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
             }
             Self::Global(name) => write!(f, "Global {},", name.get()),
             Self::Local(id) => write!(f, "Local {id},"),
+            Self::Var(name) => write!(f, "Var {}", name.get()),
             Self::Constant(imm) => writeln!(f, "Imm {imm},"),
         }
     }

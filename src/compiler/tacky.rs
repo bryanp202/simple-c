@@ -76,7 +76,7 @@ pub enum BinaryOp {
 
 pub struct AsmConverter {
     stack: usize,
-    registers: Vec<usize>, // Stores the offset of each pseudo register
+    registers: Vec<Option<usize>>, // Stores the offset of each pseudo register
 }
 
 impl Default for AsmConverter {
@@ -101,8 +101,13 @@ impl AsmConverter {
 }
 
 impl<'src> AsmConverter {
+    fn reset_for_fn(&mut self) {
+        self.stack = 0;
+        self.registers.clear();
+    }
+
     fn reserve_or_get(&mut self, pseudo_id: usize, size: usize, align: usize) -> usize {
-        if let Some(&pos) = self.registers.get(pseudo_id) {
+        if let Some(&Some(pos)) = self.registers.get(pseudo_id) {
             return pos;
         }
 
@@ -110,7 +115,13 @@ impl<'src> AsmConverter {
         self.stack = (self.stack + (align - 1)) & !(align - 1);
         self.stack += size;
         let pos = self.stack;
-        self.registers.push(pos);
+
+        // Check if temp registers are being accessed out of order
+        while self.registers.len() < pseudo_id {
+            self.registers.resize(pseudo_id, None);
+        }
+
+        self.registers.push(Some(pos));
         pos
     }
 
@@ -308,6 +319,7 @@ impl<'src> AsmConverter {
     }
 
     fn fill_function(&mut self, fun: asm::Function<'src>) -> asm::Function<'src> {
+        self.reset_for_fn();
         let asm::Function { name, insts } = fun;
         let filled_insts = insts.into_iter().map(|inst| self.fill_inst(inst)).collect();
         asm::Function {

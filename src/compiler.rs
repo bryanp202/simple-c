@@ -1,6 +1,5 @@
 use std::{
     ffi::OsString,
-    io::{BufWriter, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -9,14 +8,16 @@ use clap::builder::OsStr;
 
 use crate::{
     CompileArgs, CompileFlags,
-    arena::Arena,
+    arena::{Arena, TypedArena},
     compiler::{
         ast::TackyConverter,
         error::{BuildError, CompileError},
         parser::Parser,
+        pretty::pretty_print,
         tacky::AsmConverter,
+        ty::built_in_types, tychk::TyChecker,
     },
-    intern::Interner,
+    intern::{InternedArena, Interner},
 };
 
 mod asm;
@@ -27,6 +28,8 @@ mod parser;
 mod pretty;
 mod tacky;
 mod token;
+mod ty;
+mod tychk;
 
 pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
     let mut asm_files = Vec::new();
@@ -130,6 +133,7 @@ fn generate_unit(
     src_path: PathBuf,
     i_path: &Path,
 ) -> Result<PathBuf, CompileError> {
+    let mut id_interner = Interner::new();
     let src = match std::fs::read_to_string(&src_path) {
         Ok(src) => src,
         Err(err) => {
@@ -148,34 +152,35 @@ fn generate_unit(
         i_path.with_extension("s")
     };
 
-    let mut id_interner = Interner::new();
-    let ast_arena = Arena::new();
+    // Put into block so that ty_arena and ast_arena free before optimizations and codegen
+    let tacky_program = {
+        let ty_arena = TypedArena::new();
+        let mut ty_interner = InternedArena::new(&ty_arena);
+        let ast_arena = Arena::new();
 
-    // Parse into an ast
-    let ast_tree = Parser::new(&src, &mut id_interner, &ast_arena).parse(src_path.to_path_buf())?;
-    if compile_flags.show_pretty_ast {
-        let mut buf = BufWriter::new(std::io::stderr());
-        write!(&mut buf, "{}: {ast_tree}", src_path.display()).unwrap_or_else(|err| {
-            eprintln!("{err}: failed to print ast for: {}", src_path.display())
-        });
-    }
+        // Parse into an ast
+        let types = built_in_types(&mut id_interner, &mut ty_interner);
+        let ast_tree = Parser::new(&src, &mut id_interner, &mut ty_interner, &ast_arena, types)
+            .parse(src_path.to_path_buf())?;
+        if compile_flags.show_pretty_ast {
+            pretty_print(&ast_tree, "ast", &src_path);
+        }
 
-    // Convert into a three address code IR
-    let tacky_program = TackyConverter::new().convert(ast_tree);
-    if compile_flags.show_pretty_tacky {
-        let mut buf = BufWriter::new(std::io::stderr());
-        write!(&mut buf, "{}: {tacky_program}", src_path.display()).unwrap_or_else(|err| {
-            eprintln!("{err}: failed to print tacky for: {}", src_path.display())
-        });
-    }
+        // Semantic pass
+        let checked_ast_tree = TyChecker::new().check(&src, src_path.clone(), ast_tree)?;
+
+        // Convert into a three address code IR
+        let tacky_program = TackyConverter::new().convert(checked_ast_tree);
+        if compile_flags.show_pretty_tacky {
+            pretty_print(&tacky_program, "tacky", &src_path);
+        }
+        tacky_program
+    };
 
     // Convert into x86_64 asm IR
     let asm_program = AsmConverter::new().convert(tacky_program);
     if compile_flags.show_pretty_asm {
-        let mut buf = BufWriter::new(std::io::stderr());
-        write!(&mut buf, "{}: {asm_program}", src_path.display()).unwrap_or_else(|err| {
-            eprintln!("{err}: failed to print asm for: {}", src_path.display())
-        });
+        pretty_print(&asm_program, "asm", &src_path);
     }
 
     // Output x86_64 asm to file

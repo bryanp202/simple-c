@@ -7,43 +7,52 @@ use crate::{
         error::{CompileError, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
         token::{Precedence, Token, TokenTy},
+        ty::{Ty, TyInterner, TyStack},
     },
-    intern::Interner,
+    intern::{Interned, Interner},
 };
 
 type Alloc<'a> = &'a Arena<'static>;
-type Program<'s, 'a> = ast::Program<'s, Alloc<'a>>;
-type Item<'s, 'a> = ast::Item<'s, Alloc<'a>>;
-type Stmt<'s, 'a> = ast::Stmt<'s, Alloc<'a>>;
+type Program<'s, 'a> = ast::Program<'s, 'a, Alloc<'a>>;
+type Item<'s, 'a> = ast::Item<'s, 'a, Alloc<'a>>;
+type Stmt<'s, 'a> = ast::Stmt<'s, 'a, Alloc<'a>>;
 type Expr<'s, 'a> = ast::Expr<'s, Alloc<'a>>;
 
 pub struct Parser<'src, 'a> {
     src: &'src str,
     lexer: Lexer<'src>,
     id_interner: &'src mut Interner<'src, str>,
+    ty_interner: &'a TyInterner<'src, 'a>,
     ast_arena: Alloc<'a>,
     curr: Token,
     prev: Token,
     errors: Vec<SyntaxErrorWithCtx>,
     // Program data
     globals: Vec<GlobalVar<'src>>,
+    types: TyStack<'src, 'a>,
+    local_count: usize, // Num of locals in current fn, used to offset temp reg
 }
 
 impl<'src, 'a> Parser<'src, 'a> {
     pub fn new(
         src: &'src str,
         id_interner: &'src mut Interner<'src, str>,
+        ty_interner: &'a mut TyInterner<'src, 'a>,
         ast_arena: &'a Arena<'static>,
+        types: TyStack<'src, 'a>,
     ) -> Self {
         Self {
             src,
             lexer: Lexer::new(src),
             id_interner,
+            ty_interner,
             ast_arena,
             curr: Token::new(TokenTy::Eof, 0..0),
             prev: Token::new(TokenTy::Eof, 0..0),
             errors: Vec::new(),
             globals: Vec::new(),
+            types,
+            local_count: 0,
         }
     }
 
@@ -62,7 +71,13 @@ impl<'src, 'a> Parser<'src, 'a> {
 
             match item {
                 Item::Fn { name, body } => {
-                    functions.push(Function { name, body, local_count: 0 });
+                    let local_count = self.local_count;
+                    self.local_count = 0;
+                    functions.push(Function {
+                        name,
+                        body,
+                        local_count,
+                    });
                 }
             }
         }
@@ -82,7 +97,7 @@ impl<'src, 'a> Parser<'src, 'a> {
     }
 
     #[inline]
-    fn get_src_str(&self, token: &Token) -> &str {
+    fn get_src_str(&self, token: &Token) -> &'src str {
         &self.src[token.ctx.clone()]
     }
 
@@ -124,6 +139,16 @@ impl<'src, 'a> Parser<'src, 'a> {
         self.curr.ty
     }
 
+    #[inline]
+    fn intern_prev(&mut self) -> Interned<'src, str> {
+        self.id_interner.intern(&self.src[self.prev.ctx.clone()])
+    }
+
+    #[inline]
+    fn intern_next(&mut self) -> Interned<'src, str> {
+        self.id_interner.intern(&self.src[self.curr.ctx.clone()])
+    }
+
     fn advance_unchecked(&mut self) {
         let next = self.lexer.advance_token();
         let prev = std::mem::replace(&mut self.curr, next);
@@ -149,6 +174,41 @@ impl<'src, 'a> Parser<'src, 'a> {
         }
     }
 
+    fn eat_if(&mut self, expected: TokenTy) -> bool {
+        if self.check(expected) {
+            self.advance_unchecked();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Checks if the next token is a type or not
+    ///
+    /// Must check if an identifier is in the types stack because of typedef
+    fn next_is_type(&mut self) -> bool {
+        match self.peek() {
+            TokenTy::Int => true,
+            TokenTy::Identifier => {
+                let id = self.intern_next();
+                self.types.get(id).is_some()
+            }
+            _ => false,
+        }
+    }
+
+    fn parse_type(&mut self) -> Result<Interned<'a, Ty<'src, 'a>>, SyntaxErrorWithCtx> {
+        if !self.eat_if(TokenTy::Identifier) {
+            self.eat(TokenTy::Int, SyntaxError::UnknownSymbol)?;
+        }
+        let id = self.intern_prev();
+
+        self.types
+            .get(id)
+            .copied()
+            .ok_or(self.error(SyntaxError::UnknownSymbol))
+    }
+
     fn item(&mut self) -> Option<Item<'src, 'a>> {
         match self.function() {
             Ok(fun) => Some(fun),
@@ -162,32 +222,90 @@ impl<'src, 'a> Parser<'src, 'a> {
     fn function(&mut self) -> Result<Item<'src, 'a>, SyntaxErrorWithCtx> {
         self.eat(TokenTy::Int, SyntaxError::UnknownSymbol)?;
         self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
-        let name_token = self.prev.clone();
-        let name = self.id_interner.intern(&self.src[name_token.ctx]);
+        let name = self.intern_prev();
 
         self.eat(TokenTy::OpenParen, SyntaxError::ExpectedFunctionArgs)?;
         self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
-        self.eat(TokenTy::OpenBrace, SyntaxError::UnterminatedBlockComment)?;
 
-        let mut body = Vec::new();
-        while !self.at_end() && !self.check(TokenTy::CloseBrace) {
-            body.push(self.stmt()?);
-        }
-
-        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter)?;
+        let Stmt::Block(body) = self.block()? else {
+            unreachable!("block parsing returned non-block stmt");
+        };
 
         Ok(Item::Fn { name, body })
+    }
+}
+
+/// Statements
+impl<'src, 'a> Parser<'src, 'a> {
+    fn declaration(&mut self) -> Result<Option<Stmt<'src, 'a>>, SyntaxErrorWithCtx> {
+        if let TokenTy::Typedef = self.peek() {
+            self.typedef()?;
+            return Ok(None);
+        }
+
+        // Check if variable declaration
+        if self.next_is_type() {
+            Ok(Some(self.var_declaration()?))
+        } else {
+            Ok(Some(self.stmt()?))
+        }
+    }
+
+    fn typedef(&mut self) -> Result<(), SyntaxErrorWithCtx> {
+        self.advance_unchecked();
+
+        let ty = self.parse_type()?;
+        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
+        let id = self.intern_prev();
+        self.types.push(id, ty);
+
+        Ok(())
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+        let ty = self.parse_type()?;
+        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
+        let name = self.intern_prev();
+
+        // Check for optional initializer
+        let init = if self.eat_if(TokenTy::Equal) {
+            let expr = self.expr()?;
+            Some(self.alloc_expr(expr))
+        } else {
+            None
+        };
+
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
+        Ok(Stmt::Decl(name, ty, init))
     }
 
     fn stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
         match self.peek() {
+            TokenTy::OpenBrace => self.block(),
             TokenTy::Semicolon => {
                 self.advance_unchecked();
                 Ok(Stmt::Nil)
-            },
-            TokenTy::Return => self.ret_stmt(),
+            }
+            TokenTy::Return => self.ret(),
             _ => self.expr_stmt(),
-        }       
+        }
+    }
+
+    fn block(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+        self.advance_unchecked();
+
+        let types_old_top = self.types.enter_scope();
+        let mut stmts = Vec::new();
+
+        while !self.at_end() && !self.check(TokenTy::CloseBrace) {
+            if let Some(stmt) = self.declaration()? {
+                stmts.push(stmt);
+            }
+        }
+        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter)?;
+
+        self.types.exit_scope(types_old_top);
+        Ok(Stmt::Block(stmts))
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
@@ -196,7 +314,7 @@ impl<'src, 'a> Parser<'src, 'a> {
         Ok(Stmt::Expr(self.alloc_expr(expr)))
     }
 
-    fn ret_stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+    fn ret(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
         self.advance_unchecked();
         let expr = self.expr()?;
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
@@ -222,6 +340,7 @@ impl<'src, 'a> Parser<'src, 'a> {
         match self.advance()? {
             TokenTy::Minus | TokenTy::Tilde | TokenTy::Bang => self.unary(),
             TokenTy::Const => self.constant(),
+            TokenTy::Identifier => self.ident(),
             TokenTy::OpenParen => self.grouping(),
             _ => Err(self.error(SyntaxError::InvalidExpr)),
         }
@@ -323,6 +442,11 @@ impl<'src, 'a> Parser<'src, 'a> {
             .map_err(|_| self.error(SyntaxError::IntegerLiteralTooLarge))?;
 
         Ok(Expr::Constant(cnst))
+    }
+
+    fn ident(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+        let id = self.intern_prev();
+        Ok(Expr::Var(id))
     }
 
     fn grouping(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {

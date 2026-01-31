@@ -8,6 +8,7 @@ use std::{
 use unicode_width::UnicodeWidthStr;
 
 pub type SyntaxErrorWithCtx = ErrorWithCtx<SyntaxError>;
+pub type SemanticErrorWithCtx = ErrorWithCtx<SemanticError>;
 
 type ContextInner = u32;
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
@@ -69,6 +70,10 @@ pub enum CompileError {
         src_path: PathBuf,
         err_cache: ErrorCache<SyntaxError>,
     },
+    SemanticErrors {
+        src_path: PathBuf,
+        err_cache: ErrorCache<SemanticError>,
+    },
     // SemanticErrors {
     //     src_path: PathBuf,
     //     lines_buf: String,
@@ -91,6 +96,10 @@ impl Display for CompileError {
                 src_path,
                 err_cache,
             } => err_cache.display(f, src_path),
+            Self::SemanticErrors {
+                src_path,
+                err_cache,
+            } => err_cache.display(f, src_path),
         }
     }
 }
@@ -104,6 +113,19 @@ impl CompileError {
         let err_cache = ErrorCache::from_errors_with_ctx(src, errors);
 
         Self::SyntaxErrors {
+            src_path,
+            err_cache,
+        }
+    }
+
+    pub fn from_semantic_errors(
+        src: &str,
+        src_path: PathBuf,
+        errors: Vec<ErrorWithCtx<SemanticError>>,
+    ) -> Self {
+        let err_cache = ErrorCache::from_errors_with_ctx(src, errors);
+
+        Self::SemanticErrors {
             src_path,
             err_cache,
         }
@@ -142,7 +164,7 @@ impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::ExpectedFunctionArgs => "expected function args after function identifier",
-            Self::ExpectedIdentifier => "expected an identifier after function return type",
+            Self::ExpectedIdentifier => "expected an identifier after type",
             Self::ExpectedSemicolon => "expected semicolon after statement",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidExpr => "invalid expression",
@@ -153,6 +175,25 @@ impl Display for SyntaxError {
         };
         let error_code = *self as usize;
         write!(f, "[STXE{error_code}] {msg}")
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SemanticError {
+    DuplicateDecl,
+    InvalidLValue,
+    UndeclaredVar,
+}
+
+impl Display for SemanticError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = match self {
+            Self::DuplicateDecl => "duplicate declaration",
+            Self::InvalidLValue => "invalid lvalue",
+            Self::UndeclaredVar => "use of undeclared variable",
+        };
+        let error_code = *self as usize;
+        write!(f, "[SEME{error_code}] {msg}")
     }
 }
 
