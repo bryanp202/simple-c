@@ -149,14 +149,6 @@ impl Lexer<'_> {
         }
     }
 
-    #[inline]
-    /// Advance while a certain predicate is false
-    fn eat_while_not(&mut self, predicate: impl Fn(char) -> bool) {
-        while !predicate(self.peek()) {
-            self.advance();
-        }
-    }
-
     /// Skip all whitespace while keeping track of line and column numbers
     fn skip_whitespace(&mut self) -> Result<(), SyntaxError> {
         loop {
@@ -243,16 +235,4 @@ impl Lexer<'_> {
             TokenTy::Identifier
         }
     }
-}
-
-pub fn tokenize(input: &str) -> impl Iterator<Item = Token> {
-    let mut lexer = Lexer::new(input);
-    std::iter::from_fn(move || {
-        let token = lexer.advance_token();
-        if TokenTy::Eof == token.ty {
-            None
-        } else {
-            Some(token)
-        }
-    })
 }
