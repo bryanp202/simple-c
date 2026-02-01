@@ -59,14 +59,6 @@ impl<'a, T: ?Sized + Eq + Hash> Interner<'a, T> {
 
         Interned(id)
     }
-
-    pub fn len(&self) -> usize {
-        self.unique.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 impl<'a, T: Eq + Hash> Interner<'a, T> {
@@ -125,7 +117,7 @@ fn intern_test() {
     assert_eq!(id1, id1_again);
     assert_eq!(id2, id2_again);
     assert_eq!(id3, id3_again);
-    assert_eq!(interner.len(), 8);
+    assert_eq!(interner.unique.len(), 8);
 }
 
 #[test]
