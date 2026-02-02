@@ -154,11 +154,17 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_expr(
+    #[inline]
+    fn resolve_expr(&mut self, mut expr: Box<Expr<'src, 'a>, Alloc<'a>>) -> Box<Expr<'src, 'a>, Alloc<'a>> {
+        *expr = self.resolve_expr_unboxed(*expr);
+        expr
+    }
+
+    fn resolve_expr_unboxed(
         &mut self,
-        mut expr: Box<Expr<'src, 'a>, Alloc<'a>>,
-    ) -> Box<Expr<'src, 'a>, Alloc<'a>> {
-        *expr = match *expr {
+        expr: Expr<'src, 'a>,
+    ) -> Expr<'src, 'a> {
+        match expr {
             Expr::Assign(_, lhs, _) if !Self::is_lvalue(&lhs) => {
                 self.log_err(Self::error(SemanticError::InvalidLValue));
                 Expr::Poisoned
@@ -201,9 +207,8 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     ..
                 }) => Expr::Local(*id),
             },
-            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) | Expr::Poisoned => *expr,
-        };
-        expr
+            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) | Expr::Poisoned => expr,
+        }
     }
 
     fn is_lvalue(expr: &Expr<'src, 'a>) -> bool {

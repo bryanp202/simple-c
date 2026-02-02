@@ -167,7 +167,7 @@ impl<'src, 'a> Parser<'src, 'a> {
                 break;
             }
 
-            if matches!(self.curr.ty, TokenTy::OpenBrace | TokenTy::Semicolon) {
+            if matches!(self.curr.ty, TokenTy::OpenBrace | TokenTy::Semicolon | TokenTy::CloseBrace) {
                 break;
             }
 
@@ -190,6 +190,7 @@ impl<'src, 'a> Parser<'src, 'a> {
         self.prev.ty
     }
 
+    #[inline]
     fn eat(&mut self, expected: TokenTy, err: SyntaxError) -> bool {
         if self.check(expected) {
             self.advance_unchecked();
@@ -201,6 +202,7 @@ impl<'src, 'a> Parser<'src, 'a> {
         }
     }
 
+    #[inline]
     fn eat_if(&mut self, expected: TokenTy) -> bool {
         if self.check(expected) {
             self.advance_unchecked();
@@ -340,7 +342,7 @@ impl<'src, 'a> Parser<'src, 'a> {
     }
 
     fn poison_expr(&mut self, err: SyntaxError) -> Expr<'src, 'a> {
-        self.log_err(self.error(err));
+        self.log_err(self.error_at(err));
         self.synchronize();
         Expr::Poisoned
     }
