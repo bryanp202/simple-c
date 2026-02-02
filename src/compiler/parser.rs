@@ -22,7 +22,7 @@ pub struct Parser<'src, 'a> {
     src: &'src str,
     lexer: Lexer<'src>,
     id_interner: &'src mut Interner<'src, str>,
-    ty_interner: &'a TyInterner<'src, 'a>,
+    ty_interner: &'a mut TyInterner<'src, 'a>,
     ast_arena: Alloc<'a>,
     curr: Token,
     prev: Token,
@@ -82,11 +82,18 @@ impl<'src, 'a> Parser<'src, 'a> {
             }
         }
 
-        let program = Program {
-            globals: self.globals,
-            functions,
-        };
-        Ok(program)
+        if !self.errors.is_empty() {
+            Err(CompileError::from_syntax_errors(
+                self.src,
+                src_path,
+                self.errors,
+            ))
+        } else {
+            Ok(Program {
+                globals: self.globals,
+                functions,
+            })
+        }
     }
 }
 
@@ -149,28 +156,48 @@ impl<'src, 'a> Parser<'src, 'a> {
         self.id_interner.intern(&self.src[self.curr.ctx.clone()])
     }
 
+    fn synchronize(&mut self) {
+        loop {
+            // Check if start of decl
+            if self.next_is_type() {
+                break;
+            }
+
+            if matches!(self.prev.ty, TokenTy::Colon | TokenTy::CloseBrace) {
+                break;
+            }
+
+            if matches!(self.curr.ty, TokenTy::OpenBrace | TokenTy::Semicolon) {
+                break;
+            }
+
+            self.advance();
+        }
+    }
+
     fn advance_unchecked(&mut self) {
         let next = self.lexer.advance_token();
         let prev = std::mem::replace(&mut self.curr, next);
         self.prev = prev;
     }
 
-    fn advance(&mut self) -> Result<TokenTy, SyntaxErrorWithCtx> {
-        if let TokenTy::Err(err) = self.curr.ty {
-            Err(self.error_at(err))
-        } else {
+    fn advance(&mut self) -> TokenTy {
+        self.advance_unchecked();
+        while let TokenTy::Err(err) = self.prev.ty {
+            self.log_err(self.error_at(err));
             self.advance_unchecked();
-            Ok(self.prev.ty)
         }
+        self.prev.ty
     }
 
-    fn eat(&mut self, expected: TokenTy, err: SyntaxError) -> Result<(), SyntaxErrorWithCtx> {
+    fn eat(&mut self, expected: TokenTy, err: SyntaxError) -> bool {
         if self.check(expected) {
             self.advance_unchecked();
-            Ok(())
+            true
         } else {
-            self.advance()?;
-            Err(self.error(err))
+            self.log_err(self.error_at(err));
+            self.synchronize();
+            false
         }
     }
 
@@ -197,147 +224,151 @@ impl<'src, 'a> Parser<'src, 'a> {
         }
     }
 
-    fn parse_type(&mut self) -> Result<Interned<'a, Ty<'src, 'a>>, SyntaxErrorWithCtx> {
+    fn parse_type(&mut self) -> Interned<'a, Ty<'src, 'a>> {
         if !self.eat_if(TokenTy::Identifier) {
-            self.eat(TokenTy::Int, SyntaxError::UnknownSymbol)?;
+            self.eat(TokenTy::Int, SyntaxError::UnknownSymbol);
         }
         let id = self.intern_prev();
 
-        self.types
-            .get(id)
-            .copied()
-            .ok_or(self.error(SyntaxError::UnknownSymbol))
+        self.types.get(id).copied().unwrap_or_else(|| {
+            self.log_err(self.error(SyntaxError::UnknownSymbol));
+            self.synchronize();
+            self.ty_interner.intern(Ty::Poisoned)
+        })
     }
 
     fn item(&mut self) -> Option<Item<'src, 'a>> {
-        match self.function() {
-            Ok(fun) => Some(fun),
-            Err(err) => {
-                self.log_err(err);
-                None
-            }
-        }
+        Some(self.function())
     }
 
-    fn function(&mut self) -> Result<Item<'src, 'a>, SyntaxErrorWithCtx> {
-        self.eat(TokenTy::Int, SyntaxError::UnknownSymbol)?;
-        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
+    fn function(&mut self) -> Item<'src, 'a> {
+        self.eat(TokenTy::Int, SyntaxError::UnknownSymbol);
+        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier);
         let name = self.intern_prev();
 
-        self.eat(TokenTy::OpenParen, SyntaxError::ExpectedFunctionArgs)?;
-        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
+        self.eat(TokenTy::OpenParen, SyntaxError::ExpectedFunctionArgs);
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
 
-        let Stmt::Block(body) = self.block()? else {
+        let Stmt::Block(body) = self.block() else {
             unreachable!("block parsing returned non-block stmt");
         };
 
-        Ok(Item::Fn { name, body })
+        Item::Fn { name, body }
     }
 }
 
 /// Statements
 impl<'src, 'a> Parser<'src, 'a> {
-    fn declaration(&mut self) -> Result<Option<Stmt<'src, 'a>>, SyntaxErrorWithCtx> {
+    fn declaration(&mut self) -> Option<Stmt<'src, 'a>> {
         if let TokenTy::Typedef = self.peek() {
-            self.typedef()?;
-            return Ok(None);
+            self.typedef();
+            return None;
         }
 
         // Check if variable declaration
         if self.next_is_type() {
-            Ok(Some(self.var_declaration()?))
+            Some(self.var_declaration())
         } else {
-            Ok(Some(self.stmt()?))
+            Some(self.stmt())
         }
     }
 
-    fn typedef(&mut self) -> Result<(), SyntaxErrorWithCtx> {
+    fn typedef(&mut self) {
         self.advance_unchecked();
 
-        let ty = self.parse_type()?;
-        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
+        let ty = self.parse_type();
+        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier);
         let id = self.intern_prev();
         self.types.push(id, ty);
-
-        Ok(())
     }
 
-    fn var_declaration(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
-        let ty = self.parse_type()?;
-        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier)?;
+    fn var_declaration(&mut self) -> Stmt<'src, 'a> {
+        let ty = self.parse_type();
+        self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier);
         let name = self.intern_prev();
 
         // Check for optional initializer
         let init = if self.eat_if(TokenTy::Equal) {
-            let expr = self.expr()?;
+            let expr = self.expr();
             Some(self.alloc_expr(expr))
         } else {
             None
         };
 
-        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
-        Ok(Stmt::Decl(name, ty, init))
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+        Stmt::Decl(name, ty, init)
     }
 
-    fn stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+    fn stmt(&mut self) -> Stmt<'src, 'a> {
         match self.peek() {
             TokenTy::OpenBrace => self.block(),
-            TokenTy::Semicolon => {
-                self.advance_unchecked();
-                Ok(Stmt::Nil)
-            }
             TokenTy::Return => self.ret(),
             _ => self.expr_stmt(),
         }
     }
 
-    fn block(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+    fn block(&mut self) -> Stmt<'src, 'a> {
         self.advance_unchecked();
 
         let old_scope_bottom = self.types.enter_scope();
         let mut stmts = Vec::new();
 
         while !self.at_end() && !self.check(TokenTy::CloseBrace) {
-            if let Some(stmt) = self.declaration()? {
+            if let Some(stmt) = self.declaration() {
                 stmts.push(stmt);
             }
         }
-        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter)?;
+        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter);
 
         self.types.exit_scope(old_scope_bottom);
-        Ok(Stmt::Block(stmts))
+        Stmt::Block(stmts)
     }
 
-    fn expr_stmt(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
-        let expr = self.expr()?;
-        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
-        Ok(Stmt::Expr(self.alloc_expr(expr)))
+    fn expr_stmt(&mut self) -> Stmt<'src, 'a> {
+        if let Some(expr) = self.optional_expr(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon) {
+            Stmt::Expr(self.alloc_expr(expr))
+        } else {
+            Stmt::Nil
+        }
     }
 
-    fn ret(&mut self) -> Result<Stmt<'src, 'a>, SyntaxErrorWithCtx> {
+    fn ret(&mut self) -> Stmt<'src, 'a> {
         self.advance_unchecked();
-        let expr = self.expr()?;
-        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon)?;
-        Ok(Stmt::Return(self.alloc_expr(expr)))
+        let expr = self.expr();
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+        Stmt::Return(self.alloc_expr(expr))
+    }
+
+    fn poison_expr(&mut self, err: SyntaxError) -> Expr<'src, 'a> {
+        self.log_err(self.error(err));
+        self.synchronize();
+        Expr::Poisoned
+    }
+
+    fn optional_expr(&mut self, ender: TokenTy, err: SyntaxError) -> Option<Expr<'src, 'a>> {
+        if self.eat_if(ender) {
+            None
+        } else {
+            let expr = self.expr();
+            self.eat(TokenTy::Semicolon, err);
+            Some(expr)
+        }
     }
 
     #[inline]
-    fn expr(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn expr(&mut self) -> Expr<'src, 'a> {
         self.expr_with_precedence(Precedence::None.up())
     }
 
-    fn expr_with_precedence(
-        &mut self,
-        prec: Precedence,
-    ) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
-        let expr = self.prefix_expr()?;
+    fn expr_with_precedence(&mut self, prec: Precedence) -> Expr<'src, 'a> {
+        let expr = self.prefix_expr();
 
         self.anyfix_expr(expr, prec)
     }
 
     #[inline]
-    fn prefix_expr(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
-        match self.advance()? {
+    fn prefix_expr(&mut self) -> Expr<'src, 'a> {
+        match self.peek() {
             TokenTy::PlusPlus
             | TokenTy::MinusMinus
             | TokenTy::Plus
@@ -347,32 +378,28 @@ impl<'src, 'a> Parser<'src, 'a> {
             TokenTy::Const => self.constant(),
             TokenTy::Identifier => self.ident(),
             TokenTy::OpenParen => self.grouping(),
-            _ => Err(self.error(SyntaxError::InvalidExpr)),
+            _ => self.poison_expr(SyntaxError::InvalidExpr),
         }
     }
 
     #[inline]
-    fn anyfix_expr(
-        &mut self,
-        mut expr: Expr<'src, 'a>,
-        old_prec: Precedence,
-    ) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn anyfix_expr(&mut self, mut expr: Expr<'src, 'a>, old_prec: Precedence) -> Expr<'src, 'a> {
         loop {
             let new_prec = self.peek().anyfix_precedence();
             if new_prec < old_prec {
-                return Ok(expr);
+                return expr;
             }
             self.advance_unchecked();
 
             expr = match new_prec {
-                Precedence::Assignment => self.assignment(expr)?,
-                Precedence::Postfix => self.postfix(expr)?,
-                new_prec => self.binary(expr, new_prec)?,
+                Precedence::Assignment => self.assignment(expr),
+                Precedence::Postfix => self.postfix(expr),
+                new_prec => self.binary(expr, new_prec),
             }
         }
     }
 
-    fn assignment(&mut self, lhs: Expr<'src, 'a>) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn assignment(&mut self, lhs: Expr<'src, 'a>) -> Expr<'src, 'a> {
         let op = match self.prev.ty {
             TokenTy::Equal => AssignOp::Eq,
             TokenTy::PlusEqual => AssignOp::Add,
@@ -387,15 +414,11 @@ impl<'src, 'a> Parser<'src, 'a> {
             TokenTy::PipeEqual => AssignOp::Or,
             _ => unreachable!("invalid tokenty {:?} reached assignment", self.prev.ty),
         };
-        let rhs = self.expr_with_precedence(Precedence::Assignment)?;
-        Ok(Expr::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs)))
+        let rhs = self.expr_with_precedence(Precedence::Assignment);
+        Expr::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs))
     }
 
-    fn binary(
-        &mut self,
-        lhs: Expr<'src, 'a>,
-        prec: Precedence,
-    ) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn binary(&mut self, lhs: Expr<'src, 'a>, prec: Precedence) -> Expr<'src, 'a> {
         let op = match self.prev.ty {
             TokenTy::Star => BinaryOp::Mul,
             TokenTy::Slash => BinaryOp::Div,
@@ -425,11 +448,13 @@ impl<'src, 'a> Parser<'src, 'a> {
             _ => unreachable!("Unexpected TokenTy: {:?} made it to binary", self.prev.ty),
         };
 
-        let rhs = self.expr_with_precedence(prec.up())?;
-        Ok(Expr::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs)))
+        let rhs = self.expr_with_precedence(prec.up());
+        Expr::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs))
     }
 
-    fn unary(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn unary(&mut self) -> Expr<'src, 'a> {
+        self.advance_unchecked();
+
         let op = match self.prev.ty {
             TokenTy::Plus => UnaryOp::Plus,
             TokenTy::Minus => UnaryOp::Negate,
@@ -439,35 +464,39 @@ impl<'src, 'a> Parser<'src, 'a> {
             TokenTy::MinusMinus => UnaryOp::Decrement,
             _ => unreachable!(),
         };
-        let operand = self.expr_with_precedence(Precedence::Unary)?;
-        Ok(Expr::Unary(op, self.alloc_expr(operand)))
+        let operand = self.expr_with_precedence(Precedence::Unary);
+        Expr::Unary(op, self.alloc_expr(operand))
     }
 
-    fn postfix(&mut self, operand: Expr<'src, 'a>) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn postfix(&mut self, operand: Expr<'src, 'a>) -> Expr<'src, 'a> {
         match self.prev.ty {
-            TokenTy::PlusPlus => Ok(Expr::DecInc(UnaryOp::Increment, self.alloc_expr(operand))),
-            TokenTy::Minus => Ok(Expr::DecInc(UnaryOp::Decrement, self.alloc_expr(operand))),
+            TokenTy::PlusPlus => Expr::DecInc(UnaryOp::Increment, self.alloc_expr(operand)),
+            TokenTy::Minus => Expr::DecInc(UnaryOp::Decrement, self.alloc_expr(operand)),
             _ => unreachable!(),
         }
     }
 
-    fn constant(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
-        let cnst = self
-            .get_src_str(&self.prev)
-            .parse()
-            .map_err(|_| self.error(SyntaxError::IntegerLiteralTooLarge))?;
-
-        Ok(Expr::Constant(cnst))
+    fn constant(&mut self) -> Expr<'src, 'a> {
+        self.advance_unchecked();
+        match self.get_src_str(&self.prev).parse() {
+            Ok(cnst) => Expr::Constant(cnst),
+            Err(_) => {
+                self.log_err(self.error(SyntaxError::IntegerLiteralTooLarge));
+                Expr::Poisoned
+            }
+        }
     }
 
-    fn ident(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
+    fn ident(&mut self) -> Expr<'src, 'a> {
+        self.advance_unchecked();
         let id = self.intern_prev();
-        Ok(Expr::Var(id))
+        Expr::Var(id)
     }
 
-    fn grouping(&mut self) -> Result<Expr<'src, 'a>, SyntaxErrorWithCtx> {
-        let expr = self.expr()?;
-        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter)?;
-        Ok(expr)
+    fn grouping(&mut self) -> Expr<'src, 'a> {
+        self.advance_unchecked();
+        let expr = self.expr();
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
+        expr
     }
 }

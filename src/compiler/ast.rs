@@ -43,11 +43,12 @@ pub enum Expr<'src, A: Allocator> {
     Assign(AssignOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand
-    DecInc(UnaryOp, Box<Expr<'src, A>, A>),                         // Op, operand (op is either ++ or --)
+    DecInc(UnaryOp, Box<Expr<'src, A>, A>), // Op, operand (op is either ++ or --)
     Global(Interned<'src, str>),
     Var(Interned<'src, str>),
     Local(usize),
     Constant(i32),
+    Poisoned,
 }
 
 #[derive(Clone, Copy)]
@@ -225,6 +226,7 @@ impl<'src, 'ty> TackyConverter {
             Expr::Local(id) => tacky::Val::Temp(id),
             Expr::Constant(imm) => tacky::Val::Const(imm),
             Expr::Var(_) => unreachable!("Var expr node not resolve"),
+            Expr::Poisoned => unreachable!("Attempted to convert poison ast node"),
         }
     }
 
@@ -383,7 +385,12 @@ impl<'src, 'ty> TackyConverter {
         dst
     }
 
-    fn dec_inc(&mut self, ast_op: UnaryOp, expr: Expr<'src, impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) -> tacky::Val<'src> {
+    fn dec_inc(
+        &mut self,
+        ast_op: UnaryOp,
+        expr: Expr<'src, impl Allocator>,
+        insts: &mut Vec<tacky::Inst<'src>>,
+    ) -> tacky::Val<'src> {
         let operand = self.expr(expr, insts);
         let op = match ast_op {
             UnaryOp::Decrement => tacky::BinaryOp::Sub,
@@ -392,7 +399,12 @@ impl<'src, 'ty> TackyConverter {
         };
         let dst = self.new_temp();
         insts.push(tacky::Inst::Copy { src: operand, dst });
-        insts.push(tacky::Inst::Binary { op, lhs: operand, rhs: tacky::Val::Const(1), dst: operand });
+        insts.push(tacky::Inst::Binary {
+            op,
+            lhs: operand,
+            rhs: tacky::Val::Const(1),
+            dst: operand,
+        });
         dst
     }
 }

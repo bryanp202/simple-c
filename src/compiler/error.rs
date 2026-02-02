@@ -164,8 +164,8 @@ impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::ExpectedFunctionArgs => "expected function args after function identifier",
-            Self::ExpectedIdentifier => "expected an identifier after type",
-            Self::ExpectedSemicolon => "expected semicolon after statement",
+            Self::ExpectedIdentifier => "expected an identifier",
+            Self::ExpectedSemicolon => "expected a ';'",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidExpr => "invalid expression",
             Self::InvalidIntegerSuffix => "invalid integer suffix",

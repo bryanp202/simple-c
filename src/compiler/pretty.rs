@@ -178,6 +178,7 @@ impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
             Self::Local(id) => write!(f, "Local {id},"),
             Self::Var(name) => write!(f, "Var {}", name.get()),
             Self::Constant(imm) => writeln!(f, "Imm {imm},"),
+            Self::Poisoned => writeln!(f, "Poisoned"),
         }
     }
 }

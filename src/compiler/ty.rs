@@ -5,7 +5,8 @@ use crate::intern::{Interned, InternedArena, Interner};
 pub type TyInterner<'s, 'a> = InternedArena<'a, 'static, Ty<'s, 'a>>;
 pub type TyStack<'s, 'a> = ScopeStack<Interned<'s, str>, Interned<'a, Ty<'s, 'a>>>;
 
-const BUILT_IN_TYPES: [(&'static str, Ty<'static, 'static>); 1] = [("int", Ty::Int)];
+const BUILT_IN_TYPES: [(&'static str, Ty<'static, 'static>); 2] =
+    [("int", Ty::Int), ("", Ty::Poisoned)];
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum Ty<'src, 'a> {
@@ -18,12 +19,14 @@ pub enum Ty<'src, 'a> {
         def: Interned<'src, str>,
         members: Vec<Interned<'a, Ty<'src, 'a>>>,
     },
+    Poisoned,
 }
 
 impl<'src, 'a> Display for Ty<'src, 'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int => write!(f, "int"),
+            Self::Poisoned => write!(f, "poisoned"),
             Self::Function { .. } | Self::Adt { .. } => todo!("Ty display"),
         }
     }

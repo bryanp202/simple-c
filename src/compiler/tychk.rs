@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, GlobalVar, UnaryOp}, error::{CompileError, Context, SemanticError, SemanticErrorWithCtx}, ty::{ScopeStack, Ty}
+        ast::{self, GlobalVar, UnaryOp},
+        error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
+        ty::{ScopeStack, Ty},
     },
     intern::Interned,
 };
@@ -68,16 +70,19 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         mut self,
         src: &'src str,
         src_path: PathBuf,
-        mut ast_program: Program<'src, 'a>,
+        ast_program: Program<'src, 'a>,
     ) -> Result<Program<'src, 'a>, CompileError> {
-        for function in &mut ast_program.functions {
-            self.reset_for_fn();
-            self.resolve_fn(function);
-        }
+        let functions = ast_program
+            .functions
+            .into_iter()
+            .map(|fun| self.resolve_fn(fun))
+            .collect();
 
-        for global in &mut ast_program.globals {
-            self.resolve_global(global);
-        }
+        let globals = ast_program
+            .globals
+            .into_iter()
+            .map(|global| self.resolve_global(global))
+            .collect();
 
         if !self.errors.is_empty() {
             Err(CompileError::from_semantic_errors(
@@ -86,119 +91,119 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 self.errors,
             ))
         } else {
-            Ok(ast_program)
+            Ok(Program { functions, globals })
         }
     }
 
-    fn resolve_global(&mut self, global: &mut GlobalVar<'src>) {}
-
-    fn resolve_fn(&mut self, fun: &mut Function<'src, 'a>) {
-        let body = std::mem::take(&mut fun.body);
-        let mut new_body = Vec::new();
-        for stmt in body {
-            match self.resolve_stmt(stmt, &mut new_body) {
-                Ok(()) => {}
-                Err(err) => self.log_err(err),
-            }
-        }
-
-        std::mem::swap(&mut fun.body, &mut new_body);
+    fn resolve_global(&mut self, global: GlobalVar<'src>) -> GlobalVar<'src> {
+        global
     }
 
-    fn resolve_stmt(
-        &mut self,
-        mut stmt: Stmt<'src, 'a>,
-        stmts: &mut Vec<Stmt<'src, 'a>>,
-    ) -> Result<(), SemanticErrorWithCtx> {
+    fn resolve_fn(&mut self, fun: Function<'src, 'a>) -> Function<'src, 'a> {
+        let Function {
+            name,
+            body,
+            local_count,
+        } = fun;
+        self.reset_for_fn();
+
+        let body = body
+            .into_iter()
+            .map(|stmt| self.resolve_stmt(stmt))
+            .collect();
+        Function {
+            name,
+            body,
+            local_count,
+        }
+    }
+
+    fn resolve_stmt(&mut self, stmt: Stmt<'src, 'a>) -> Stmt<'src, 'a> {
         match stmt {
-            Stmt::Block(sub_stmts) => {
+            Stmt::Block(stmts) => {
                 let old_scope_bottom = self.var_map.enter_scope();
-                for sub_stmt in sub_stmts {
-                    self.resolve_stmt(sub_stmt, stmts)?;
-                }
+                let stmts = stmts
+                    .into_iter()
+                    .map(|stmt| self.resolve_stmt(stmt))
+                    .collect();
                 self.var_map.exit_scope(old_scope_bottom);
-                return Ok(());
+                return Stmt::Block(stmts);
             }
-            Stmt::Expr(ref mut expr) => self.resolve_expr(expr)?,
-            Stmt::Decl(name, ty, ref mut init) => {
+            Stmt::Expr(expr) => Stmt::Expr(self.resolve_expr(expr)),
+            Stmt::Decl(name, ty, init) => {
                 if self.var_map.in_scope(name) {
-                    return Err(Self::error(SemanticError::DuplicateDecl));
-                }
-
-                let local = self.new_local();
-                self.var_map.push(
-                    name,
-                    SymbolInfo {
-                        ty,
-                        attributes: Attributes {
-                            scope: ScopeTy::Local(local),
+                    self.log_err(Self::error(SemanticError::DuplicateDecl));
+                } else {
+                    let local = self.new_local();
+                    self.var_map.push(
+                        name,
+                        SymbolInfo {
+                            ty,
+                            attributes: Attributes {
+                                scope: ScopeTy::Local(local),
+                            },
                         },
-                    },
-                );
-
-                if let Some(expr) = init {
-                    self.resolve_expr(expr)?;
+                    );
                 }
+
+                let init = init.map(|expr| self.resolve_expr(expr));
+                Stmt::Decl(name, ty, init)
             }
-            Stmt::Nil => {}
-            Stmt::Return(ref mut expr) => self.resolve_expr(expr)?,
+            Stmt::Nil => Stmt::Nil,
+            Stmt::Return(expr) => Stmt::Return(self.resolve_expr(expr)),
         }
-
-        stmts.push(stmt);
-
-        Ok(())
     }
 
     fn resolve_expr(
         &mut self,
-        expr: &mut Expr<'src, 'a>,
-    ) -> Result<(), SemanticErrorWithCtx> {
-        match expr {
+        mut expr: Box<Expr<'src, 'a>, Alloc<'a>>,
+    ) -> Box<Expr<'src, 'a>, Alloc<'a>> {
+        *expr = match *expr {
             Expr::Assign(_, lhs, _) if !Self::is_lvalue(&lhs) => {
-                Err(Self::error(SemanticError::InvalidLValue))
+                self.log_err(Self::error(SemanticError::InvalidLValue));
+                Expr::Poisoned
             }
-            Expr::Assign(_, lhs, rhs) => self.resolve_exprs(lhs, rhs),
-            Expr::Binary(_, lhs, rhs) => self.resolve_exprs(lhs, rhs),
-            Expr::Unary(op, operand) => {
-                match op {
-                    UnaryOp::Decrement | UnaryOp::Increment if !Self::is_lvalue(&operand) => Err(Self::error(SemanticError::InvalidLValue)),
-                    _ => self.resolve_expr(operand)
+            Expr::Assign(op, lhs, rhs) => {
+                Expr::Assign(op, self.resolve_expr(lhs), self.resolve_expr(rhs))
+            }
+            Expr::Binary(op, lhs, rhs) => {
+                Expr::Binary(op, self.resolve_expr(lhs), self.resolve_expr(rhs))
+            }
+            Expr::Unary(op, operand) => match op {
+                UnaryOp::Decrement | UnaryOp::Increment if !Self::is_lvalue(&operand) => {
+                    self.log_err(Self::error(SemanticError::InvalidLValue));
+                    Expr::Poisoned
                 }
+                _ => Expr::Unary(op, self.resolve_expr(operand)),
+            },
+            Expr::DecInc(_, ref operand) if !Self::is_lvalue(operand) => {
+                self.log_err(Self::error(SemanticError::InvalidLValue));
+                Expr::Poisoned
             }
-            Expr::DecInc(_, operand) if !Self::is_lvalue(operand) => {
-                Err(Self::error(SemanticError::InvalidLValue))
-            }
-            Expr::DecInc(_, operand) => self.resolve_expr(operand),
-            Expr::Var(name) => match self.var_map.get(*name) {
-                None => Err(Self::error(SemanticError::UndeclaredVar)),
+            Expr::DecInc(op, operand) => Expr::DecInc(op, self.resolve_expr(operand)),
+            Expr::Var(name) => match self.var_map.get(name) {
+                None => {
+                    self.log_err(Self::error(SemanticError::UndeclaredVar));
+                    Expr::Poisoned
+                }
                 Some(SymbolInfo {
                     attributes:
                         Attributes {
                             scope: ScopeTy::Global,
                         },
                     ..
-                }) => {
-                    *expr = Expr::Global(*name);
-                    Ok(())
-                }
+                }) => Expr::Global(name),
                 Some(SymbolInfo {
                     attributes:
                         Attributes {
                             scope: ScopeTy::Local(id),
                         },
                     ..
-                }) => {
-                    *expr = Expr::Local(*id);
-                    Ok(())
-                }
+                }) => Expr::Local(*id),
             },
-            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) => Ok(()),
-        }
-    }
-
-    fn resolve_exprs(&mut self, lhs: &mut Expr<'src, 'a>, rhs: &mut Expr<'src, 'a>) -> Result<(), SemanticErrorWithCtx> {
-        self.resolve_expr(lhs)?;
-        self.resolve_expr(rhs)
+            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) | Expr::Poisoned => *expr,
+        };
+        expr
     }
 
     fn is_lvalue(expr: &Expr<'src, 'a>) -> bool {
