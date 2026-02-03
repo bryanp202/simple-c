@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, GlobalVar, UnaryOp},
+        ast::{self, AssignOp, BinaryOp, GlobalVar, UnaryOp},
         error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
-        ty::{ScopeStack, Ty},
+        ty::{ScopeStack, Ty, TyInterner},
     },
     intern::Interned,
 };
@@ -15,13 +15,17 @@ type Program<'s, 'a> = ast::Program<'s, 'a, Alloc<'a>>;
 type Function<'s, 'a> = ast::Function<'s, 'a, Alloc<'a>>;
 type Stmt<'s, 'a> = ast::Stmt<'s, 'a, Alloc<'a>>;
 type Expr<'s, 'a> = ast::Expr<'s, Alloc<'a>>;
+type ExprTy<'s, 'a> = ast::ExprTy<'s, Alloc<'a>>;
+
+type TypedProgram<'s, 'a> = ast::typed::Program<'s, 'a, Alloc<'a>>;
+type TypedGlobalVar<'s> = ast::typed::GlobalVar<'s>;
+type TypedFunction<'s, 'a> = ast::typed::Function<'s, 'a, Alloc<'a>>;
+type TypedStmt<'s, 'a> = ast::typed::Stmt<'s, 'a, Alloc<'a>>;
+type TypedExpr<'s, 'a> = ast::typed::Expr<'s, 'a, Alloc<'a>>;
+type TypedExprTy<'s, 'a> = ast::typed::ExprTy<'s, 'a, Alloc<'a>>;
 
 struct SymbolInfo<'src, 'a> {
     ty: Interned<'a, Ty<'src, 'a>>,
-    attributes: Attributes,
-}
-
-struct Attributes {
     scope: ScopeTy,
 }
 
@@ -31,39 +35,22 @@ enum ScopeTy {
 }
 
 pub struct TyChecker<'src, 'a> {
+    poisoned_ty: Interned<'a, Ty<'src, 'a>>,
+    ast_arena: Alloc<'a>,
     var_map: ScopeStack<Interned<'src, str>, SymbolInfo<'src, 'a>>,
     errors: Vec<SemanticErrorWithCtx>,
     local_count: usize,
 }
 
 impl<'src, 'a> TyChecker<'src, 'a> {
-    pub fn new() -> Self {
+    pub fn new(ty_interner: &'a mut TyInterner<'src, 'a>, ast_arena: Alloc<'a>) -> Self {
         Self {
+            poisoned_ty: ty_interner.intern(Ty::Poisoned),
+            ast_arena,
             var_map: ScopeStack::new(),
             errors: Vec::new(),
             local_count: 0,
         }
-    }
-
-    fn reset_for_fn(&mut self) {
-        self.local_count = 0;
-    }
-
-    fn new_local(&mut self) -> usize {
-        let local = self.local_count;
-        self.local_count += 1;
-        local
-    }
-
-    fn error(err: SemanticError) -> SemanticErrorWithCtx {
-        SemanticErrorWithCtx {
-            ctx: Context::from(0..1),
-            err,
-        }
-    }
-
-    fn log_err(&mut self, err: SemanticErrorWithCtx) {
-        self.errors.push(err);
     }
 
     pub fn check(
@@ -71,7 +58,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         src: &'src str,
         src_path: PathBuf,
         ast_program: Program<'src, 'a>,
-    ) -> Result<Program<'src, 'a>, CompileError> {
+    ) -> Result<TypedProgram<'src, 'a>, CompileError> {
         let functions = ast_program
             .functions
             .into_iter()
@@ -91,15 +78,56 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 self.errors,
             ))
         } else {
-            Ok(Program { functions, globals })
+            Ok(TypedProgram { functions, globals })
         }
     }
 
-    fn resolve_global(&mut self, global: GlobalVar<'src>) -> GlobalVar<'src> {
-        global
+    #[inline]
+    fn reset_for_fn(&mut self) {
+        self.local_count = 0;
     }
 
-    fn resolve_fn(&mut self, fun: Function<'src, 'a>) -> Function<'src, 'a> {
+    #[inline]
+    fn new_local(&mut self) -> usize {
+        let local = self.local_count;
+        self.local_count += 1;
+        local
+    }
+
+    #[inline]
+    fn log_err(&mut self, ctx: Context, err: SemanticError) {
+        self.errors.push(SemanticErrorWithCtx { ctx, err });
+    }
+
+    #[inline]
+    fn error(&mut self, ctx: Context, err: SemanticError) -> TypedExpr<'src, 'a> {
+        self.log_err(ctx, err);
+        TypedExpr {
+            expr: TypedExprTy::Poisoned,
+            ty: self.poisoned_ty,
+        }
+    }
+
+    #[inline]
+    fn alloc_expr(&self, expr: TypedExpr<'src, 'a>) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
+        Box::new_in(expr, self.ast_arena)
+    }
+
+    fn common_type(
+        &self,
+        lhs: Interned<'a, Ty<'src, 'a>>,
+        rhs: Interned<'a, Ty<'src, 'a>>,
+    ) -> Interned<'a, Ty<'src, 'a>> {
+        if lhs == rhs { lhs } else { self.poisoned_ty }
+    }
+}
+
+impl<'src, 'a> TyChecker<'src, 'a> {
+    fn resolve_global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
+        TypedGlobalVar { name: global.name }
+    }
+
+    fn resolve_fn(&mut self, fun: Function<'src, 'a>) -> TypedFunction<'src, 'a> {
         let Function {
             name,
             body,
@@ -111,14 +139,14 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             .into_iter()
             .map(|stmt| self.resolve_stmt(stmt))
             .collect();
-        Function {
+        TypedFunction {
             name,
             body,
             local_count,
         }
     }
 
-    fn resolve_stmt(&mut self, stmt: Stmt<'src, 'a>) -> Stmt<'src, 'a> {
+    fn resolve_stmt(&mut self, stmt: Stmt<'src, 'a>) -> TypedStmt<'src, 'a> {
         match stmt {
             Stmt::Block(stmts) => {
                 let old_scope_bottom = self.var_map.enter_scope();
@@ -127,91 +155,134 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     .map(|stmt| self.resolve_stmt(stmt))
                     .collect();
                 self.var_map.exit_scope(old_scope_bottom);
-                return Stmt::Block(stmts);
+                return TypedStmt::Block(stmts);
             }
-            Stmt::Expr(expr) => Stmt::Expr(self.resolve_expr(expr)),
-            Stmt::Decl(name, ty, init) => {
-                if self.var_map.in_scope(name) {
-                    self.log_err(Self::error(SemanticError::DuplicateDecl));
+            Stmt::Expr(expr) => TypedStmt::Expr(self.resolve_expr(*expr)),
+            Stmt::Decl(ident, ty, init) => {
+                if self.var_map.in_scope(ident.name) {
+                    self.log_err(ident.ctx, SemanticError::DuplicateDecl);
                 } else {
                     let local = self.new_local();
                     self.var_map.push(
-                        name,
+                        ident.name,
                         SymbolInfo {
                             ty,
-                            attributes: Attributes {
-                                scope: ScopeTy::Local(local),
-                            },
+                            scope: ScopeTy::Local(local),
                         },
                     );
                 }
 
-                let init = init.map(|expr| self.resolve_expr(expr));
-                Stmt::Decl(name, ty, init)
+                let init = init.map(|expr| self.resolve_expr(*expr));
+                TypedStmt::Decl(init)
             }
-            Stmt::Nil => Stmt::Nil,
-            Stmt::Return(expr) => Stmt::Return(self.resolve_expr(expr)),
+            Stmt::Nil => TypedStmt::Nil,
+            Stmt::Return(expr) => TypedStmt::Return(self.resolve_expr(*expr)),
         }
     }
 
-    #[inline]
     fn resolve_expr(
         &mut self,
-        mut expr: Box<Expr<'src, 'a>, Alloc<'a>>,
-    ) -> Box<Expr<'src, 'a>, Alloc<'a>> {
-        *expr = self.resolve_expr_unboxed(*expr);
-        expr
+        Expr { expr, ctx }: Expr<'src, 'a>,
+    ) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
+        let typed = match expr {
+            ExprTy::Assign(op, lhs, rhs) => self.resolve_assign(op, *lhs, *rhs),
+            ExprTy::Binary(op, lhs, rhs) => self.resolve_binary(op, *lhs, *rhs),
+            ExprTy::Unary(op, operand) => self.resolve_unary(op, *operand),
+            ExprTy::DecInc(op, operand) => self.resolve_decinc(op, *operand),
+            ExprTy::Var(name) => self.resolve_var(name, ctx),
+            ExprTy::Constant(imm) => TypedExpr {
+                expr: TypedExprTy::Constant(imm),
+                ty: self.poisoned_ty,
+            },
+            ExprTy::Poisoned => TypedExpr {
+                expr: TypedExprTy::Poisoned,
+                ty: self.poisoned_ty,
+            },
+        };
+        self.alloc_expr(typed)
     }
 
-    fn resolve_expr_unboxed(&mut self, expr: Expr<'src, 'a>) -> Expr<'src, 'a> {
-        match expr {
-            Expr::Assign(_, lhs, _) if !Self::is_lvalue(&lhs) => {
-                self.log_err(Self::error(SemanticError::InvalidLValue));
-                Expr::Poisoned
+    fn resolve_assign(
+        &mut self,
+        op: AssignOp,
+        lhs: Expr<'src, 'a>,
+        rhs: Expr<'src, 'a>,
+    ) -> TypedExpr<'src, 'a> {
+        if is_lvalue(&lhs) {
+            let lhs = self.resolve_expr(lhs);
+            let rhs = self.resolve_expr(rhs);
+            let ty = self.common_type(lhs.ty, rhs.ty);
+            TypedExpr {
+                expr: TypedExprTy::Assign(op, lhs, rhs),
+                ty,
             }
-            Expr::Assign(op, lhs, rhs) => {
-                Expr::Assign(op, self.resolve_expr(lhs), self.resolve_expr(rhs))
-            }
-            Expr::Binary(op, lhs, rhs) => {
-                Expr::Binary(op, self.resolve_expr(lhs), self.resolve_expr(rhs))
-            }
-            Expr::Unary(op, operand) => match op {
-                UnaryOp::Decrement | UnaryOp::Increment if !Self::is_lvalue(&operand) => {
-                    self.log_err(Self::error(SemanticError::InvalidLValue));
-                    Expr::Poisoned
-                }
-                _ => Expr::Unary(op, self.resolve_expr(operand)),
-            },
-            Expr::DecInc(_, ref operand) if !Self::is_lvalue(operand) => {
-                self.log_err(Self::error(SemanticError::InvalidLValue));
-                Expr::Poisoned
-            }
-            Expr::DecInc(op, operand) => Expr::DecInc(op, self.resolve_expr(operand)),
-            Expr::Var(name) => match self.var_map.get(name) {
-                None => {
-                    self.log_err(Self::error(SemanticError::UndeclaredVar));
-                    Expr::Poisoned
-                }
-                Some(SymbolInfo {
-                    attributes:
-                        Attributes {
-                            scope: ScopeTy::Global,
-                        },
-                    ..
-                }) => Expr::Global(name),
-                Some(SymbolInfo {
-                    attributes:
-                        Attributes {
-                            scope: ScopeTy::Local(id),
-                        },
-                    ..
-                }) => Expr::Local(*id),
-            },
-            Expr::Constant(_) | Expr::Global(_) | Expr::Local(_) | Expr::Poisoned => expr,
+        } else {
+            self.error(lhs.ctx, SemanticError::InvalidLValue)
         }
     }
 
-    fn is_lvalue(expr: &Expr<'src, 'a>) -> bool {
-        matches!(expr, &Expr::Var(_))
+    fn resolve_binary(
+        &mut self,
+        op: BinaryOp,
+        lhs: Expr<'src, 'a>,
+        rhs: Expr<'src, 'a>,
+    ) -> TypedExpr<'src, 'a> {
+        let lhs = self.resolve_expr(lhs);
+        let rhs = self.resolve_expr(rhs);
+        let ty = self.common_type(lhs.ty, rhs.ty);
+        TypedExpr {
+            expr: TypedExprTy::Binary(op, lhs, rhs),
+            ty,
+        }
     }
+
+    fn resolve_unary(&mut self, op: UnaryOp, operand: Expr<'src, 'a>) -> TypedExpr<'src, 'a> {
+        if matches!(op, UnaryOp::Increment | UnaryOp::Decrement) && !is_lvalue(&operand) {
+            self.error(operand.ctx, SemanticError::InvalidLValue)
+        } else {
+            let operand = self.resolve_expr(operand);
+            let ty = operand.ty;
+            TypedExpr {
+                expr: TypedExprTy::Unary(op, operand),
+                ty,
+            }
+        }
+    }
+
+    fn resolve_decinc(&mut self, op: UnaryOp, operand: Expr<'src, 'a>) -> TypedExpr<'src, 'a> {
+        if is_lvalue(&operand) {
+            let operand = self.resolve_expr(operand);
+            let ty = operand.ty;
+            TypedExpr {
+                expr: TypedExprTy::DecInc(op, operand),
+                ty,
+            }
+        } else {
+            self.error(operand.ctx, SemanticError::InvalidLValue)
+        }
+    }
+
+    fn resolve_var(&mut self, name: Interned<'src, str>, ctx: Context) -> TypedExpr<'src, 'a> {
+        match self.var_map.get(name) {
+            None => self.error(ctx, SemanticError::UndeclaredVar),
+            Some(&SymbolInfo {
+                ty,
+                scope: ScopeTy::Global,
+            }) => TypedExpr {
+                expr: TypedExprTy::Global(name),
+                ty,
+            },
+            Some(&SymbolInfo {
+                ty,
+                scope: ScopeTy::Local(id),
+            }) => TypedExpr {
+                expr: TypedExprTy::Local(id),
+                ty,
+            },
+        }
+    }
+}
+
+fn is_lvalue<'src, 'a>(expr: &Expr<'src, 'a>) -> bool {
+    matches!(&expr.expr, &ExprTy::Var(_))
 }

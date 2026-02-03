@@ -7,3 +7,5 @@ No backend symbol table:
 - static variables in fn are added at global item for that program, but are not accessible from anywhere outside the method
 - Add a tacky GetArg(asm::Reg) inst so optimizer knows where arguments are coming from
 - TypedAst has local and global nodes. local nodes are just unique numbers and global are interned str
+
+All expr should have context? For semantic errors

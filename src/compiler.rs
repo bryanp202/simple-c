@@ -192,7 +192,11 @@ fn generate_tacky<'src>(
     }
 
     // Semantic pass
-    let checked_ast_tree = TyChecker::new().check(&src, src_path.to_path_buf(), ast_tree)?;
+    let checked_ast_tree = TyChecker::new(&mut ty_interner, &ast_arena).check(
+        &src,
+        src_path.to_path_buf(),
+        ast_tree,
+    )?;
 
     // Convert into a three address code IR
     let tacky_program = ast::Converter::new().convert(checked_ast_tree);

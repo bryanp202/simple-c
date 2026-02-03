@@ -1,10 +1,19 @@
-use std::alloc::Allocator;
-
-use crate::compiler::{
-    asm::Label,
-    ast::{AssignOp, BinaryOp, Expr, Function, GlobalVar, Program, Stmt, UnaryOp},
-    tacky,
+use crate::{
+    arena::Arena,
+    compiler::{
+        asm::Label,
+        ast::{self, AssignOp, BinaryOp, UnaryOp},
+        tacky,
+    },
 };
+
+type Alloc<'a> = &'a Arena<'static>;
+type GlobalVar<'s> = ast::typed::GlobalVar<'s>;
+type Program<'s, 'a> = ast::typed::Program<'s, 'a, Alloc<'a>>;
+type Function<'s, 'a> = ast::typed::Function<'s, 'a, Alloc<'a>>;
+type Stmt<'s, 'a> = ast::typed::Stmt<'s, 'a, Alloc<'a>>;
+type Expr<'s, 'a> = ast::typed::Expr<'s, 'a, Alloc<'a>>;
+type ExprTy<'s, 'a> = ast::typed::ExprTy<'s, 'a, Alloc<'a>>;
 
 pub struct Converter {
     temp_count: usize,
@@ -27,10 +36,7 @@ impl Converter {
         }
     }
 
-    pub fn convert<'src, 'ty, A: Allocator>(
-        &mut self,
-        program: Program<'src, 'ty, A>,
-    ) -> tacky::Program<'src> {
+    pub fn convert<'src, 'a>(&mut self, program: Program<'src, 'a>) -> tacky::Program<'src> {
         let Program { globals, functions } = program;
         let globals = globals
             .into_iter()
@@ -44,7 +50,7 @@ impl Converter {
     }
 }
 
-impl<'src, 'ty> Converter {
+impl<'src, 'a> Converter {
     #[inline]
     fn reset_for_fn(&mut self, local_count: usize) {
         self.temp_count = local_count;
@@ -77,7 +83,7 @@ impl<'src, 'ty> Converter {
         tacky::GlobalVar { name }
     }
 
-    fn function(&mut self, fun: Function<'src, 'ty, impl Allocator>) -> tacky::Function<'src> {
+    fn function(&mut self, fun: Function<'src, 'a>) -> tacky::Function<'src> {
         let Function {
             name,
             body,
@@ -95,14 +101,14 @@ impl<'src, 'ty> Converter {
         tacky::Function { name, insts }
     }
 
-    fn stmt(&mut self, stmt: Stmt<'src, 'ty, impl Allocator>, insts: &mut Vec<tacky::Inst<'src>>) {
+    fn stmt(&mut self, stmt: Stmt<'src, 'a>, insts: &mut Vec<tacky::Inst<'src>>) {
         match stmt {
             Stmt::Block(stmts) => {
                 for stmt in stmts {
                     self.stmt(stmt, insts);
                 }
             }
-            Stmt::Decl(_, _, init) => {
+            Stmt::Decl(init) => {
                 if let Some(init) = init {
                     let src = self.expr(*init, insts);
                     insts.push(tacky::Inst::Copy {
@@ -122,27 +128,26 @@ impl<'src, 'ty> Converter {
 
     fn expr(
         &mut self,
-        expr: Expr<'src, impl Allocator>,
+        expr: Expr<'src, 'a>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
-        match expr {
-            Expr::Assign(op, lhs, rhs) => self.assign(op, *lhs, *rhs, insts),
-            Expr::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
-            Expr::Unary(op, expr) => self.unary(op, *expr, insts),
-            Expr::DecInc(op, expr) => self.dec_inc(op, *expr, insts),
-            Expr::Global(name) => tacky::Val::GlobalVar(name),
-            Expr::Local(id) => tacky::Val::Temp(id),
-            Expr::Constant(imm) => tacky::Val::Const(imm),
-            Expr::Var(_) => unreachable!("Var expr node not resolve"),
-            Expr::Poisoned => unreachable!("Attempted to convert poison ast node"),
+        match expr.expr {
+            ExprTy::Assign(op, lhs, rhs) => self.assign(op, *lhs, *rhs, insts),
+            ExprTy::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
+            ExprTy::Unary(op, expr) => self.unary(op, *expr, insts),
+            ExprTy::DecInc(op, expr) => self.dec_inc(op, *expr, insts),
+            ExprTy::Global(name) => tacky::Val::GlobalVar(name),
+            ExprTy::Local(id) => tacky::Val::Temp(id),
+            ExprTy::Constant(imm) => tacky::Val::Const(imm),
+            ExprTy::Poisoned => unreachable!("Attempted to convert poison ast node"),
         }
     }
 
-    fn assign<A: Allocator>(
+    fn assign(
         &mut self,
         ast_op: AssignOp,
-        lhs: Expr<'src, A>,
-        rhs: Expr<'src, A>,
+        lhs: Expr<'src, 'a>,
+        rhs: Expr<'src, 'a>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         let rhs = self.expr(rhs, insts);
@@ -171,11 +176,11 @@ impl<'src, 'ty> Converter {
         dst
     }
 
-    fn binary<A: Allocator>(
+    fn binary(
         &mut self,
         ast_op: BinaryOp,
-        lhs: Expr<'src, A>,
-        rhs: Expr<'src, A>,
+        lhs: Expr<'src, 'a>,
+        rhs: Expr<'src, 'a>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         match ast_op {
@@ -272,7 +277,7 @@ impl<'src, 'ty> Converter {
     fn unary(
         &mut self,
         ast_op: UnaryOp,
-        expr: Expr<'src, impl Allocator>,
+        expr: Expr<'src, 'a>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         let op = match ast_op {
@@ -280,10 +285,18 @@ impl<'src, 'ty> Converter {
             UnaryOp::Negate => tacky::UnaryOp::Negate,
             UnaryOp::Not => tacky::UnaryOp::Not,
             UnaryOp::Decrement => {
-                return self.assign(AssignOp::Sub, expr, Expr::Constant(1), insts);
+                let rhs = Expr {
+                    expr: ExprTy::Constant(1),
+                    ty: expr.ty.clone(),
+                };
+                return self.assign(AssignOp::Sub, expr, rhs, insts);
             }
             UnaryOp::Increment => {
-                return self.assign(AssignOp::Add, expr, Expr::Constant(1), insts);
+                let rhs = Expr {
+                    expr: ExprTy::Constant(1),
+                    ty: expr.ty.clone(),
+                };
+                return self.assign(AssignOp::Add, expr, rhs, insts);
             }
             UnaryOp::Plus => return self.expr(expr, insts),
         };
@@ -296,7 +309,7 @@ impl<'src, 'ty> Converter {
     fn dec_inc(
         &mut self,
         ast_op: UnaryOp,
-        expr: Expr<'src, impl Allocator>,
+        expr: Expr<'src, 'a>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         let operand = self.expr(expr, insts);

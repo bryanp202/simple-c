@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, AssignOp, BinaryOp, Function, GlobalVar, UnaryOp},
-        error::{CompileError, SyntaxError, SyntaxErrorWithCtx},
+        ast::{self, AssignOp, BinaryOp, Function, GlobalVar, Identifier, UnaryOp},
+        error::{CompileError, Context, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
         token::{Precedence, Token, TokenTy},
         ty::{Ty, TyInterner, TyStack},
@@ -17,12 +17,13 @@ type Program<'s, 'a> = ast::Program<'s, 'a, Alloc<'a>>;
 type Item<'s, 'a> = ast::Item<'s, 'a, Alloc<'a>>;
 type Stmt<'s, 'a> = ast::Stmt<'s, 'a, Alloc<'a>>;
 type Expr<'s, 'a> = ast::Expr<'s, Alloc<'a>>;
+type ExprTy<'s, 'a> = ast::ExprTy<'s, Alloc<'a>>;
 
-pub struct Parser<'src, 'a> {
+pub struct Parser<'src, 'a, 'ty> {
     src: &'src str,
     lexer: Lexer<'src>,
     id_interner: &'src mut Interner<'src, str>,
-    ty_interner: &'a mut TyInterner<'src, 'a>,
+    ty_interner: &'ty mut TyInterner<'src, 'a>,
     ast_arena: Alloc<'a>,
     curr: Token,
     prev: Token,
@@ -33,12 +34,12 @@ pub struct Parser<'src, 'a> {
     local_count: usize, // Num of locals in current fn, used to offset temp reg
 }
 
-impl<'src, 'a> Parser<'src, 'a> {
+impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     pub fn new(
         src: &'src str,
         id_interner: &'src mut Interner<'src, str>,
-        ty_interner: &'a mut TyInterner<'src, 'a>,
-        ast_arena: &'a Arena<'static>,
+        ty_interner: &'ty mut TyInterner<'src, 'a>,
+        ast_arena: Alloc<'a>,
         types: TyStack<'src, 'a>,
     ) -> Self {
         Self {
@@ -97,7 +98,7 @@ impl<'src, 'a> Parser<'src, 'a> {
     }
 }
 
-impl<'src, 'a> Parser<'src, 'a> {
+impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     #[inline]
     fn alloc_expr(&self, expr: Expr<'src, 'a>) -> Box<Expr<'src, 'a>, Alloc<'a>> {
         Box::new_in(expr, self.ast_arena)
@@ -187,7 +188,7 @@ impl<'src, 'a> Parser<'src, 'a> {
     fn advance(&mut self) -> TokenTy {
         self.advance_unchecked();
         while let TokenTy::Err(err) = self.prev.ty {
-            self.log_err(self.error_at(err));
+            self.log_err(self.error(err));
             self.advance_unchecked();
         }
         self.prev.ty
@@ -263,7 +264,7 @@ impl<'src, 'a> Parser<'src, 'a> {
 }
 
 /// Statements
-impl<'src, 'a> Parser<'src, 'a> {
+impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     fn declaration(&mut self) -> Option<Stmt<'src, 'a>> {
         if let TokenTy::Typedef = self.peek() {
             self.typedef();
@@ -290,7 +291,9 @@ impl<'src, 'a> Parser<'src, 'a> {
     fn var_declaration(&mut self) -> Stmt<'src, 'a> {
         let ty = self.parse_type();
         self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier);
+        let ctx = self.prev.ctx.clone();
         let name = self.intern_prev();
+        let ident = Identifier { name, ctx };
 
         // Check for optional initializer
         let init = if self.eat_if(TokenTy::Equal) {
@@ -301,7 +304,7 @@ impl<'src, 'a> Parser<'src, 'a> {
         };
 
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
-        Stmt::Decl(name, ty, init)
+        Stmt::Decl(ident, ty, init)
     }
 
     fn stmt(&mut self) -> Stmt<'src, 'a> {
@@ -345,9 +348,15 @@ impl<'src, 'a> Parser<'src, 'a> {
     }
 
     fn poison_expr(&mut self, err: SyntaxError) -> Expr<'src, 'a> {
-        self.log_err(self.error_at(err));
+        if !matches!(self.peek(), TokenTy::Err(_)) {
+            self.log_err(self.error_at(err));
+        }
+        let ctx = self.curr.ctx.clone();
         self.synchronize();
-        Expr::Poisoned
+        Expr {
+            expr: ExprTy::Poisoned,
+            ctx,
+        }
     }
 
     fn optional_expr(&mut self, ender: TokenTy, err: SyntaxError) -> Option<Expr<'src, 'a>> {
@@ -383,7 +392,10 @@ impl<'src, 'a> Parser<'src, 'a> {
             TokenTy::Const => self.constant(),
             TokenTy::Identifier => self.ident(),
             TokenTy::OpenParen => self.grouping(),
-            _ => self.poison_expr(SyntaxError::InvalidExpr),
+            _ => {
+                dbg!(self.peek());
+                self.poison_expr(SyntaxError::InvalidExpr)
+            },
         }
     }
 
@@ -420,7 +432,11 @@ impl<'src, 'a> Parser<'src, 'a> {
             _ => unreachable!("invalid tokenty {:?} reached assignment", self.prev.ty),
         };
         let rhs = self.expr_with_precedence(Precedence::Assignment);
-        Expr::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs))
+        let ctx = Context::from_sub(lhs.ctx.clone(), rhs.ctx.clone());
+        Expr {
+            expr: ExprTy::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs)),
+            ctx,
+        }
     }
 
     fn binary(&mut self, lhs: Expr<'src, 'a>, prec: Precedence) -> Expr<'src, 'a> {
@@ -454,7 +470,11 @@ impl<'src, 'a> Parser<'src, 'a> {
         };
 
         let rhs = self.expr_with_precedence(prec.up());
-        Expr::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs))
+        let ctx = Context::from_sub(lhs.ctx.clone(), rhs.ctx.clone());
+        Expr {
+            expr: ExprTy::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs)),
+            ctx,
+        }
     }
 
     fn unary(&mut self) -> Expr<'src, 'a> {
@@ -469,14 +489,26 @@ impl<'src, 'a> Parser<'src, 'a> {
             TokenTy::MinusMinus => UnaryOp::Decrement,
             _ => unreachable!(),
         };
+        let op_ctx = self.prev.ctx.clone();
         let operand = self.expr_with_precedence(Precedence::Unary);
-        Expr::Unary(op, self.alloc_expr(operand))
+        let ctx = Context::from_sub(op_ctx, operand.ctx.clone());
+        Expr {
+            expr: ExprTy::Unary(op, self.alloc_expr(operand)),
+            ctx,
+        }
     }
 
     fn postfix(&mut self, operand: Expr<'src, 'a>) -> Expr<'src, 'a> {
+        let ctx = Context::from_sub(operand.ctx.clone(), self.prev.ctx.clone());
         match self.prev.ty {
-            TokenTy::PlusPlus => Expr::DecInc(UnaryOp::Increment, self.alloc_expr(operand)),
-            TokenTy::Minus => Expr::DecInc(UnaryOp::Decrement, self.alloc_expr(operand)),
+            TokenTy::PlusPlus => Expr {
+                expr: ExprTy::DecInc(UnaryOp::Increment, self.alloc_expr(operand)),
+                ctx,
+            },
+            TokenTy::Minus => Expr {
+                expr: ExprTy::DecInc(UnaryOp::Decrement, self.alloc_expr(operand)),
+                ctx,
+            },
             _ => unreachable!(),
         }
     }
@@ -484,10 +516,16 @@ impl<'src, 'a> Parser<'src, 'a> {
     fn constant(&mut self) -> Expr<'src, 'a> {
         self.advance_unchecked();
         match self.get_src_str(&self.prev).parse() {
-            Ok(cnst) => Expr::Constant(cnst),
+            Ok(cnst) => Expr {
+                expr: ExprTy::Constant(cnst),
+                ctx: self.prev.ctx.clone(),
+            },
             Err(_) => {
                 self.log_err(self.error(SyntaxError::IntegerLiteralTooLarge));
-                Expr::Poisoned
+                Expr {
+                    expr: ExprTy::Poisoned,
+                    ctx: self.prev.ctx.clone(),
+                }
             }
         }
     }
@@ -495,13 +533,18 @@ impl<'src, 'a> Parser<'src, 'a> {
     fn ident(&mut self) -> Expr<'src, 'a> {
         self.advance_unchecked();
         let id = self.intern_prev();
-        Expr::Var(id)
+        Expr {
+            expr: ExprTy::Var(id),
+            ctx: self.prev.ctx.clone(),
+        }
     }
 
     fn grouping(&mut self) -> Expr<'src, 'a> {
         self.advance_unchecked();
-        let expr = self.expr();
+        let op_ctx = self.prev.ctx.clone();
+        let Expr { expr, .. } = self.expr();
         self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
-        expr
+        let ctx = Context::from_sub(op_ctx, self.prev.ctx.clone());
+        Expr { expr, ctx }
     }
 }

@@ -128,8 +128,8 @@ impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
                     writeln!(f)?;
                 }
             }
-            Self::Decl(name, ty, init) => {
-                writeln!(f, "Decl {} {} {{", ty.get(), name.get())?;
+            Self::Decl(ident, ty, init) => {
+                writeln!(f, "Decl {} {} {{", ty.get(), ident.name.get())?;
                 if let Some(init) = init {
                     init.pretty(f, indent + 1)?;
                 }
@@ -149,6 +149,12 @@ impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
 }
 
 impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
+    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+        self.expr.pretty(f, indent)
+    }
+}
+
+impl<A: Allocator> PrettyPrint for ast::ExprTy<'_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let spaces = indent * INDENT_SPACES;
         write!(f, "{: >spaces$}Expr: ", "")?;
@@ -175,8 +181,6 @@ impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
                 operand.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
             }
-            Self::Global(name) => writeln!(f, "Global {},", name.get()),
-            Self::Local(id) => writeln!(f, "Local {id},"),
             Self::Var(name) => writeln!(f, "Var {}", name.get()),
             Self::Constant(imm) => writeln!(f, "Imm {imm},"),
             Self::Poisoned => writeln!(f, "Poisoned"),

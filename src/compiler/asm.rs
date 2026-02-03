@@ -220,8 +220,8 @@ impl Display for BinaryOp {
             Self::Sub => "subl",
             Self::IMul => "imull",
             // Shift
-            Self::Shl => "shl",
-            Self::Sar => "sar",
+            Self::Shl => "shll",
+            Self::Sar => "sarl",
             // Bitwise
             Self::And => "andl",
             Self::Or => "orl",

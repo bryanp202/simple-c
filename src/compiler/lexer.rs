@@ -193,7 +193,7 @@ impl Lexer<'_> {
 
     /// A number, both integers and floats
     fn number(&mut self) -> TokenTy {
-        self.eat_while(|c| c.is_ascii_alphanumeric());
+        self.eat_while(|c| c.is_ascii_digit());
         match self.peek() {
             '.' | 'e' => self.float(),
             c if c.is_ascii_alphabetic() => {
