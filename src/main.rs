@@ -4,8 +4,7 @@
 
 use clap::Parser;
 use std::{
-    io::{BufWriter, Write},
-    process::ExitCode,
+    io::{BufWriter, Write}, path::PathBuf, process::ExitCode
 };
 
 use crate::compiler::compile;
@@ -19,10 +18,10 @@ mod intern;
 struct CompileArgs {
     /// Source files
     #[arg(required = true, num_args = 1..)]
-    source: Vec<std::path::PathBuf>,
+    source: Vec<PathBuf>,
     /// Output destination
     #[arg(short = 'o', long = "output")]
-    output: Option<std::path::PathBuf>,
+    output: Option<PathBuf>,
     /// Pretty print the ast
     #[arg(long)]
     pretty_ast: bool,
