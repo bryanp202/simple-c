@@ -46,7 +46,6 @@ struct CompileFlags {
     show_pretty_tacky: bool,
     show_pretty_asm: bool,
     emit_asm: bool,
-    check_only: bool,
 }
 
 impl CompileArgs {
@@ -56,7 +55,6 @@ impl CompileArgs {
             show_pretty_tacky: self.pretty_tacky,
             show_pretty_asm: self.pretty_asm,
             emit_asm: self.emit_asm,
-            check_only: self.check_only,
         }
     }
 }
