@@ -8,4 +8,4 @@ No backend symbol table:
 - Add a tacky GetArg(asm::Reg) inst so optimizer knows where arguments are coming from
 - TypedAst has local and global nodes. local nodes are just unique numbers and global are interned str
 
-All expr should have context? For semantic errors
+Compilation multithreading should be thread pooling. Worker threads ask for tlu and return results using channels
