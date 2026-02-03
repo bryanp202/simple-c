@@ -207,9 +207,37 @@ impl Display for SemanticError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct LineInfo {
+    num: usize,
+    whitespace_end: usize,
+    width: usize,
+    span: Context,
+}
+
+impl LineInfo {
+    fn new(src: &str, cache: &mut String, line_ranges: &[Range<usize>], line_num: usize) -> Self {
+        let line = &src[line_ranges[line_num].clone()];
+        let buf_start = cache.len();
+        cache.push_str(line);
+        let width = line.width();
+        let whitespace_end = line
+            .char_indices()
+            .find(|(_, c)| !c.is_ascii_whitespace())
+            .map_or(line.len(), |(i, _)| i);
+        let span = Context::from(buf_start..cache.len());
+        Self {
+            num: line_num + 1,
+            whitespace_end,
+            width,
+            span,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ErrorCache<E: Display> {
-    lines: Vec<(usize, usize, Context)>, // (line num, len in chars, range of line)
+    lines: Vec<LineInfo>,
     cache: String,
     errors: Vec<CachedError<E>>,
 }
@@ -234,10 +262,7 @@ impl<E: Display> ErrorCache<E> {
             .into_iter()
             .map(|err| Self::cache_err(src, &line_ranges, &mut unique_lines, &mut cache, err))
             .collect();
-        let lines = unique_lines
-            .into_values()
-            .map(|(_, a, b, c)| (a, b, c))
-            .collect();
+        let lines = unique_lines.into_values().map(|(_, info)| info).collect();
         Self {
             lines,
             cache,
@@ -248,7 +273,7 @@ impl<E: Display> ErrorCache<E> {
     fn cache_err(
         src: &str,
         line_ranges: &[Range<usize>],
-        unique_lines: &mut BTreeMap<usize, (usize, usize, usize, Context)>,
+        unique_lines: &mut BTreeMap<usize, (usize, LineInfo)>,
         cache: &mut String,
         err: ErrorWithCtx<E>,
     ) -> CachedError<E> {
@@ -256,18 +281,13 @@ impl<E: Display> ErrorCache<E> {
         let end_line = line_ranges.partition_point(|range| range.start < err.ctx.0.end as usize);
 
         for line_num in start_line..end_line {
-            let count = unique_lines.len();
+            let line_id = unique_lines.len();
             unique_lines.entry(line_num).or_insert_with(|| {
-                let line = &src[line_ranges[line_num].clone()];
-                let buf_start = cache.len();
-                cache.push_str(line);
-                let line_range = Context::from(buf_start..cache.len());
-                let line_width = line.width();
-                let line_id = count;
-                (line_id, line_num + 1, line_width, line_range)
+                let info = LineInfo::new(src, cache, line_ranges, line_num);
+                (line_id, info)
             });
         }
-        let first_line_id = unique_lines.get(&start_line).map_or(0, |&(id, _, _, _)| id);
+        let first_line_id = unique_lines.get(&start_line).map_or(0, |&(id, _)| id);
         let line_count = end_line - start_line;
         let line_ids = first_line_id..first_line_id + line_count;
 
@@ -290,16 +310,21 @@ impl<E: Display> ErrorCache<E> {
         }
     }
 
-    /// Returns the `line_num`, its width, and the line substr
-    fn lookup(&self, line_id: usize) -> (usize, usize, &str) {
-        let (line_num, width, line_range) = self.lines[line_id].clone();
-        let line = &self.cache[line_range];
-        (line_num, width, line)
+    /// Returns the `line_num`, whitespace_end, its width, and the line substr
+    fn lookup(&self, line_id: usize) -> (usize, usize, usize, &str) {
+        let LineInfo {
+            num,
+            whitespace_end,
+            width,
+            span,
+        } = self.lines[line_id].clone();
+        let line = &self.cache[span];
+        (num, whitespace_end, width, line)
     }
 
     /// Returns the first line num and the max width in chars of the `line_nums` from `line_id`` range
     fn get_start_info(&self, line_ids: &Range<usize>) -> (usize, usize) {
-        let (line_num, _, _) = self.lookup(line_ids.start);
+        let (line_num, _, _, _) = self.lookup(line_ids.start);
         let line_num_width = (line_num + line_ids.len() - 1)
             .checked_ilog10()
             .unwrap_or(0) as usize
@@ -332,8 +357,9 @@ impl<E: Display> ErrorCache<E> {
             let mut start_width = *start_width;
             let mut skipped = false;
             for line_id in line_ids.clone() {
-                let (line_num, line_width, line) = self.lookup(line_id);
-                if line.is_empty() {
+                let (line_num, whitespace_end, line_width, line) = self.lookup(line_id);
+                start_width = start_width.max(whitespace_end);
+                if line.is_empty() || start_width == line_width {
                     if !skipped {
                         writeln!(f, "\x1b[1m\x1b[36m...\x1b[0m")?;
                         skipped = true;
@@ -343,8 +369,8 @@ impl<E: Display> ErrorCache<E> {
                 skipped = false;
 
                 let line_char_count = match line_id + 1 == line_ids.end {
-                    true => *end_width - start_width,
-                    false => line_width - start_width,
+                    true => end_width.saturating_sub(start_width),
+                    false => line_width.saturating_sub(start_width),
                 };
                 writeln!(
                     f,

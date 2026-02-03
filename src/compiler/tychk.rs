@@ -128,10 +128,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 
     fn resolve_fn(&mut self, fun: Function<'src, 'a>) -> TypedFunction<'src, 'a> {
-        let Function {
-            name,
-            body,
-        } = fun;
+        let Function { name, body } = fun;
         self.reset_for_fn();
 
         let body = body

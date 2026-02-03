@@ -4,7 +4,9 @@
 
 use clap::Parser;
 use std::{
-    io::{BufWriter, Write}, path::PathBuf, process::ExitCode
+    io::{BufWriter, Write},
+    path::PathBuf,
+    process::ExitCode,
 };
 
 use crate::compiler::compile;

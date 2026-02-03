@@ -70,10 +70,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
             match item {
                 Item::Fn { name, body } => {
-                    functions.push(Function {
-                        name,
-                        body,
-                    });
+                    functions.push(Function { name, body });
                 }
             }
         }

@@ -112,10 +112,7 @@ impl<'src, 'a> Converter {
                 let local = self.new_local();
                 if let Some(init) = init {
                     let src = self.expr(*init, insts);
-                    insts.push(tacky::Inst::Copy {
-                        src,
-                        dst: local,
-                    });
+                    insts.push(tacky::Inst::Copy { src, dst: local });
                 }
             }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
