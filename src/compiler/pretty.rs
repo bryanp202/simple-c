@@ -125,6 +125,7 @@ impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
                 writeln!(f, "Block {{")?;
                 for stmt in stmts {
                     stmt.pretty(f, indent + 1)?;
+                    writeln!(f)?;
                 }
             }
             Self::Decl(name, ty, init) => {
@@ -174,9 +175,9 @@ impl<A: Allocator> PrettyPrint for ast::Expr<'_, A> {
                 operand.pretty(f, indent + 1)?;
                 writeln!(f, "{: >spaces$}}},", "")
             }
-            Self::Global(name) => write!(f, "Global {},", name.get()),
-            Self::Local(id) => write!(f, "Local {id},"),
-            Self::Var(name) => write!(f, "Var {}", name.get()),
+            Self::Global(name) => writeln!(f, "Global {},", name.get()),
+            Self::Local(id) => writeln!(f, "Local {id},"),
+            Self::Var(name) => writeln!(f, "Var {}", name.get()),
             Self::Constant(imm) => writeln!(f, "Imm {imm},"),
             Self::Poisoned => writeln!(f, "Poisoned"),
         }
