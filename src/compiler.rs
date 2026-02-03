@@ -33,15 +33,8 @@ mod tychk;
 
 pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
     let compile_flags = args.flags();
-    let mut asm_files = Vec::new();
-    let mut compile_errors = Vec::new();
 
-    for (module_num, src_path) in args.source.iter().enumerate() {
-        match build_unit(compile_flags, src_path.clone(), module_num) {
-            Ok(unit_asm_file) => asm_files.push(unit_asm_file.into_os_string()),
-            Err(err) => compile_errors.push(err),
-        }
-    }
+    let (asm_files, compile_errors) = compile_units(&args);
 
     let result = if compile_errors.is_empty() {
         assemble(args, &asm_files)
@@ -50,7 +43,32 @@ pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
     };
     clean_up_asm_files(compile_flags, &asm_files);
     result
+}
 
+fn compile_units(args: &CompileArgs) -> (Vec<OsString>, Vec<CompileError>) {
+    let mut asm_files = Vec::new();
+    let mut compile_errors = Vec::new();
+    let mut threads = Vec::new();
+    let compile_flags = args.flags();
+    let thread_count = args.threads as usize;
+
+    for (batch_num, src_paths) in args.source.chunks(thread_count).enumerate() {
+        for (unit_num, src_path) in src_paths.into_iter().enumerate() {
+            let src_path = src_path.clone();
+            let module_num = batch_num * thread_count + unit_num;
+            let handle =
+                std::thread::spawn(move || build_unit(compile_flags, src_path, module_num));
+            threads.push(handle);
+        }
+        for handle in threads.drain(..) {
+            match handle.join().unwrap() {
+                Ok(unit_asm_file) => asm_files.push(unit_asm_file.into_os_string()),
+                Err(err) => compile_errors.push(err),
+            }
+        }
+    }
+
+    (asm_files, compile_errors)
 }
 
 fn assemble(args: CompileArgs, asm_files: &[OsString]) -> Result<(), BuildError> {
@@ -161,7 +179,6 @@ fn generate_unit(
     if compile_flags.show_pretty_asm {
         pretty_print(&asm_program, "asm", &src_path);
     }
-
     // Output x86_64 asm to file
     asm_program
         .generate(&asm_path)

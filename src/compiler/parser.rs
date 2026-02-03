@@ -395,7 +395,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             _ => {
                 dbg!(self.peek());
                 self.poison_expr(SyntaxError::InvalidExpr)
-            },
+            }
         }
     }
 
