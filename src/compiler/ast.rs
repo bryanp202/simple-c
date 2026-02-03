@@ -1,7 +1,7 @@
 use std::alloc::{Allocator, Global};
 
 use crate::{
-    compiler::{asm::Label, error::Context, tacky, ty::Ty},
+    compiler::{error::Context, ty::Ty},
     intern::Interned,
 };
 
