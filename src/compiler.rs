@@ -10,7 +10,6 @@ use crate::{
     CompileArgs, CompileFlags,
     arena::{Arena, TypedArena},
     compiler::{
-        ast::TackyConverter,
         error::{BuildError, CompileError},
         parser::Parser,
         pretty::pretty_print,
@@ -171,7 +170,7 @@ fn generate_unit(
         let checked_ast_tree = TyChecker::new().check(&src, src_path.clone(), ast_tree)?;
 
         // Convert into a three address code IR
-        let tacky_program = TackyConverter::new().convert(checked_ast_tree);
+        let tacky_program = ast::Converter::new().convert(checked_ast_tree);
         if compile_flags.show_pretty_tacky {
             pretty_print(&tacky_program, "tacky", &src_path);
         }

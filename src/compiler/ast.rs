@@ -5,6 +5,8 @@ use crate::{
     intern::Interned,
 };
 
+pub use convert::Converter;
+
 mod convert;
 
 pub enum Item<'src, 'ty, A: Allocator = Global> {

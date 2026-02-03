@@ -2,19 +2,19 @@ use std::alloc::Allocator;
 
 use crate::compiler::{asm::Label, ast::{AssignOp, BinaryOp, Expr, Function, GlobalVar, Program, Stmt, UnaryOp}, tacky};
 
-pub struct TackyConverter {
+pub struct Converter {
     temp_count: usize,
     label_count: usize,
     curr_local: usize,
 }
 
-impl Default for TackyConverter {
+impl Default for Converter {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TackyConverter {
+impl Converter {
     pub fn new() -> Self {
         Self {
             temp_count: 0,
@@ -40,7 +40,7 @@ impl TackyConverter {
     }
 }
 
-impl<'src, 'ty> TackyConverter {
+impl<'src, 'ty> Converter {
     #[inline]
     fn reset_for_fn(&mut self, local_count: usize) {
         self.temp_count = local_count;
