@@ -32,24 +32,32 @@ mod ty;
 mod tychk;
 
 pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
+    let compile_flags = args.flags();
     let mut asm_files = Vec::new();
     let mut compile_errors = Vec::new();
 
     for (module_num, src_path) in args.source.iter().enumerate() {
-        match build_unit(args.flags(), src_path.clone(), module_num) {
+        match build_unit(compile_flags, src_path.clone(), module_num) {
             Ok(unit_asm_file) => asm_files.push(unit_asm_file.into_os_string()),
             Err(err) => compile_errors.push(err),
         }
     }
 
-    if compile_errors.is_empty() {
+    let result = if compile_errors.is_empty() {
         assemble(args, &asm_files)
     } else {
         Err(BuildError::CompileErrors(compile_errors))
-    }
+    };
+    clean_up_asm_files(compile_flags, &asm_files);
+    result
+
 }
 
 fn assemble(args: CompileArgs, asm_files: &[OsString]) -> Result<(), BuildError> {
+    if args.check_only {
+        return Ok(());
+    }
+
     let mut output_path = args.output.unwrap_or_else(|| PathBuf::from("out"));
     output_path.set_extension("exe");
 
@@ -63,19 +71,13 @@ fn assemble(args: CompileArgs, asm_files: &[OsString]) -> Result<(), BuildError>
         .output()
         .map_err(|err| BuildError::AssemblerError(err.to_string()))?;
 
-    if !output.status.success() {
-        return Err(BuildError::AssemblerError(
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(BuildError::AssemblerError(
             String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
+        ))
     }
-
-    if !args.emit_asm {
-        for asm_file in asm_files {
-            std::fs::remove_file(asm_file).expect("Build unit returned bad path");
-        }
-    }
-
-    Ok(())
 }
 
 fn build_unit(
@@ -84,7 +86,6 @@ fn build_unit(
     module_num: usize,
 ) -> Result<PathBuf, CompileError> {
     let temp_name = PathBuf::new().with_file_name(format!("_{module_num}"));
-
     let (src_path, i_path) = preprocess_unit(src_path, temp_name)?;
     generate_unit(compile_flags, src_path, &i_path)
 }
@@ -134,7 +135,7 @@ fn generate_unit(
     i_path: &Path,
 ) -> Result<PathBuf, CompileError> {
     let mut id_interner = Interner::new();
-    let src = match std::fs::read_to_string(&src_path) {
+    let src = match std::fs::read_to_string(&i_path) {
         Ok(src) => src,
         Err(err) => {
             return Err(CompileError::IoError {
@@ -185,15 +186,15 @@ fn generate_tacky<'src>(
 
     // Parse into an ast
     let types = built_in_types(id_interner, &mut ty_interner);
-    let ast_tree = Parser::new(&src, id_interner, &mut ty_interner, &ast_arena, types)
+    let ast_tree = Parser::new(src, id_interner, &mut ty_interner, &ast_arena, types)
         .parse(src_path.to_path_buf())?;
     if compile_flags.show_pretty_ast {
-        pretty_print(&ast_tree, "ast", &src_path);
+        pretty_print(&ast_tree, "ast", src_path);
     }
 
     // Semantic pass
     let checked_ast_tree = TyChecker::new(&mut ty_interner, &ast_arena).check(
-        &src,
+        src,
         src_path.to_path_buf(),
         ast_tree,
     )?;
@@ -201,7 +202,15 @@ fn generate_tacky<'src>(
     // Convert into a three address code IR
     let tacky_program = ast::Converter::new().convert(checked_ast_tree);
     if compile_flags.show_pretty_tacky {
-        pretty_print(&tacky_program, "tacky", &src_path);
+        pretty_print(&tacky_program, "tacky", src_path);
     }
     Ok(tacky_program)
+}
+
+fn clean_up_asm_files(compile_flags: CompileFlags, asm_files: &[OsString]) {
+    if !compile_flags.emit_asm {
+        for asm_file in asm_files {
+            _ = std::fs::remove_file(asm_file);
+        }
+    }
 }

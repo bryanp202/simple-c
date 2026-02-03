@@ -35,6 +35,9 @@ struct CompileArgs {
     /// Emit assembly files
     #[arg(short = 'S')]
     emit_asm: bool,
+    /// Compile with no output
+    #[arg(short = 'c', long = "check")]
+    check_only: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -43,6 +46,7 @@ struct CompileFlags {
     show_pretty_tacky: bool,
     show_pretty_asm: bool,
     emit_asm: bool,
+    check_only: bool,
 }
 
 impl CompileArgs {
@@ -52,6 +56,7 @@ impl CompileArgs {
             show_pretty_tacky: self.pretty_tacky,
             show_pretty_asm: self.pretty_asm,
             emit_asm: self.emit_asm,
+            check_only: self.check_only,
         }
     }
 }
@@ -62,9 +67,8 @@ fn main() -> ExitCode {
     let exit_code = match compile(args) {
         Err(build_err) => {
             let mut buf = BufWriter::new(std::io::stderr());
-            match write!(buf, "{build_err}") {
-                Err(err) => eprintln!("failed to print build err: {err}"),
-                Ok(()) => {}
+            if let Err(err) = write!(buf, "{build_err}") {
+                eprintln!("failed to print build err: {err}");
             }
             ExitCode::FAILURE
         }

@@ -287,14 +287,14 @@ impl<'src, 'a> Converter {
             UnaryOp::Decrement => {
                 let rhs = Expr {
                     expr: ExprTy::Constant(1),
-                    ty: expr.ty.clone(),
+                    ty: expr.ty,
                 };
                 return self.assign(AssignOp::Sub, expr, rhs, insts);
             }
             UnaryOp::Increment => {
                 let rhs = Expr {
                     expr: ExprTy::Constant(1),
-                    ty: expr.ty.clone(),
+                    ty: expr.ty,
                 };
                 return self.assign(AssignOp::Add, expr, rhs, insts);
             }

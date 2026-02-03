@@ -155,7 +155,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     .map(|stmt| self.resolve_stmt(stmt))
                     .collect();
                 self.var_map.exit_scope(old_scope_bottom);
-                return TypedStmt::Block(stmts);
+                TypedStmt::Block(stmts)
             }
             Stmt::Expr(expr) => TypedStmt::Expr(self.resolve_expr(*expr)),
             Stmt::Decl(ident, ty, init) => {
