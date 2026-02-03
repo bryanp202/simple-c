@@ -131,7 +131,6 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         let Function {
             name,
             body,
-            local_count,
         } = fun;
         self.reset_for_fn();
 
@@ -142,7 +141,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         TypedFunction {
             name,
             body,
-            local_count,
+            local_count: self.local_count,
         }
     }
 

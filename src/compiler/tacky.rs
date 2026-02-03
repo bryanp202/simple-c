@@ -117,11 +117,11 @@ impl<'src> AsmConverter {
         let pos = self.stack;
 
         // Check if temp registers are being accessed out of order
-        while self.registers.len() < pseudo_id {
-            self.registers.resize(pseudo_id, None);
+        if self.registers.len() <= pseudo_id {
+            self.registers.resize(pseudo_id + 1, None);
         }
 
-        self.registers.push(Some(pos));
+        self.registers[pseudo_id] = Some(pos);
         pos
     }
 

@@ -29,7 +29,6 @@ pub struct GlobalVar<'src> {
 pub struct Function<'src, 'a, A: Allocator = Global> {
     pub(crate) name: Interned<'src, str>,
     pub(crate) body: Vec<Stmt<'src, 'a, A>>,
-    pub(crate) local_count: usize,
 }
 
 pub struct Identifier<'src> {

@@ -31,7 +31,6 @@ pub struct Parser<'src, 'a, 'ty> {
     // Program data
     globals: Vec<GlobalVar<'src>>,
     types: TyStack<'src, 'a>,
-    local_count: usize, // Num of locals in current fn, used to offset temp reg
 }
 
 impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
@@ -53,7 +52,6 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             errors: Vec::new(),
             globals: Vec::new(),
             types,
-            local_count: 0,
         }
     }
 
@@ -72,12 +70,9 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
             match item {
                 Item::Fn { name, body } => {
-                    let local_count = self.local_count;
-                    self.local_count = 0;
                     functions.push(Function {
                         name,
                         body,
-                        local_count,
                     });
                 }
             }
@@ -392,10 +387,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             TokenTy::Const => self.constant(),
             TokenTy::Identifier => self.ident(),
             TokenTy::OpenParen => self.grouping(),
-            _ => {
-                dbg!(self.peek());
-                self.poison_expr(SyntaxError::InvalidExpr)
-            }
+            _ => self.poison_expr(SyntaxError::InvalidExpr),
         }
     }
 
