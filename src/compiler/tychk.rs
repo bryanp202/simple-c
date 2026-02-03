@@ -155,15 +155,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 
     #[inline]
-    fn resolve_expr(&mut self, mut expr: Box<Expr<'src, 'a>, Alloc<'a>>) -> Box<Expr<'src, 'a>, Alloc<'a>> {
+    fn resolve_expr(
+        &mut self,
+        mut expr: Box<Expr<'src, 'a>, Alloc<'a>>,
+    ) -> Box<Expr<'src, 'a>, Alloc<'a>> {
         *expr = self.resolve_expr_unboxed(*expr);
         expr
     }
 
-    fn resolve_expr_unboxed(
-        &mut self,
-        expr: Expr<'src, 'a>,
-    ) -> Expr<'src, 'a> {
+    fn resolve_expr_unboxed(&mut self, expr: Expr<'src, 'a>) -> Expr<'src, 'a> {
         match expr {
             Expr::Assign(_, lhs, _) if !Self::is_lvalue(&lhs) => {
                 self.log_err(Self::error(SemanticError::InvalidLValue));

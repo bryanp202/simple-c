@@ -152,30 +152,8 @@ fn generate_unit(
         i_path.with_extension("s")
     };
 
-    // Put into block so that ty_arena and ast_arena free before optimizations and codegen
-    let tacky_program = {
-        let ty_arena = TypedArena::new();
-        let mut ty_interner = InternedArena::new(&ty_arena);
-        let ast_arena = Arena::new();
-
-        // Parse into an ast
-        let types = built_in_types(&mut id_interner, &mut ty_interner);
-        let ast_tree = Parser::new(&src, &mut id_interner, &mut ty_interner, &ast_arena, types)
-            .parse(src_path.to_path_buf())?;
-        if compile_flags.show_pretty_ast {
-            pretty_print(&ast_tree, "ast", &src_path);
-        }
-
-        // Semantic pass
-        let checked_ast_tree = TyChecker::new().check(&src, src_path.clone(), ast_tree)?;
-
-        // Convert into a three address code IR
-        let tacky_program = ast::Converter::new().convert(checked_ast_tree);
-        if compile_flags.show_pretty_tacky {
-            pretty_print(&tacky_program, "tacky", &src_path);
-        }
-        tacky_program
-    };
+    // Put into function so ty and ast arena are dropped earlier
+    let tacky_program = generate_tacky(compile_flags, &src, &src_path, &mut id_interner)?;
 
     // Convert into x86_64 asm IR
     let asm_program = AsmConverter::new().convert(tacky_program);
@@ -193,4 +171,33 @@ fn generate_unit(
         })?;
 
     Ok(asm_path)
+}
+
+fn generate_tacky<'src>(
+    compile_flags: CompileFlags,
+    src: &'src str,
+    src_path: &Path,
+    id_interner: &'src mut Interner<'src, str>,
+) -> Result<tacky::Program<'src>, CompileError> {
+    let ty_arena = TypedArena::new();
+    let mut ty_interner = InternedArena::new(&ty_arena);
+    let ast_arena = Arena::new();
+
+    // Parse into an ast
+    let types = built_in_types(id_interner, &mut ty_interner);
+    let ast_tree = Parser::new(&src, id_interner, &mut ty_interner, &ast_arena, types)
+        .parse(src_path.to_path_buf())?;
+    if compile_flags.show_pretty_ast {
+        pretty_print(&ast_tree, "ast", &src_path);
+    }
+
+    // Semantic pass
+    let checked_ast_tree = TyChecker::new().check(&src, src_path.to_path_buf(), ast_tree)?;
+
+    // Convert into a three address code IR
+    let tacky_program = ast::Converter::new().convert(checked_ast_tree);
+    if compile_flags.show_pretty_tacky {
+        pretty_print(&tacky_program, "tacky", &src_path);
+    }
+    Ok(tacky_program)
 }

@@ -49,7 +49,7 @@ pub enum Expr<'src, A: Allocator> {
     Assign(AssignOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand
-    DecInc(UnaryOp, Box<Expr<'src, A>, A>),                         // Op, operand (op is either ++ or --)
+    DecInc(UnaryOp, Box<Expr<'src, A>, A>), // Op, operand (op is either ++ or --)
     Global(Interned<'src, str>),
     Var(Interned<'src, str>),
     Local(usize),

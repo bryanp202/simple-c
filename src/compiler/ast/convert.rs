@@ -1,6 +1,10 @@
 use std::alloc::Allocator;
 
-use crate::compiler::{asm::Label, ast::{AssignOp, BinaryOp, Expr, Function, GlobalVar, Program, Stmt, UnaryOp}, tacky};
+use crate::compiler::{
+    asm::Label,
+    ast::{AssignOp, BinaryOp, Expr, Function, GlobalVar, Program, Stmt, UnaryOp},
+    tacky,
+};
 
 pub struct Converter {
     temp_count: usize,
