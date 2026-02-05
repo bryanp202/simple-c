@@ -36,7 +36,7 @@ impl Converter {
         }
     }
 
-    pub fn convert<'src, 'a>(&mut self, program: Program<'src, 'a>) -> tacky::Program<'src> {
+    pub fn convert<'src>(&mut self, program: Program<'src, '_>) -> tacky::Program<'src> {
         let Program { globals, functions } = program;
         let globals = globals
             .into_iter()
@@ -46,7 +46,7 @@ impl Converter {
             .into_iter()
             .map(|fun| self.function(fun))
             .collect();
-        tacky::Program { globals, functions }
+        tacky::Program { functions, globals }
     }
 }
 

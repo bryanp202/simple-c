@@ -157,7 +157,7 @@ pub struct TypedArena<'a, T, A: Allocator = Global> {
     _own: PhantomData<T>,
 }
 
-unsafe impl<'a, #[may_dangle] T, A: Allocator> Drop for TypedArena<'a, T, A> {
+unsafe impl<#[may_dangle] T, A: Allocator> Drop for TypedArena<'_, T, A> {
     fn drop(&mut self) {
         unsafe {
             let mut chunks_borrow = self.chunks.borrow_mut();

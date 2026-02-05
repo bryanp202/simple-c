@@ -19,7 +19,7 @@ impl Context {
         Self::from(0..0)
     }
 
-    pub fn from_sub(left: Context, right: Context) -> Context {
+    pub fn from_sub(left: &Context, right: &Context) -> Context {
         Self(left.0.start..right.0.end)
     }
 }
@@ -314,7 +314,7 @@ impl<E: Display> ErrorCache<E> {
         }
     }
 
-    /// Returns the `line_num`, whitespace_end, its width, and the line substr
+    /// Returns the `line_num`, `whitespace_end`, its width, and the line substr
     fn lookup(&self, line_id: usize) -> (usize, usize, usize, &str) {
         let LineInfo {
             num,
@@ -326,7 +326,7 @@ impl<E: Display> ErrorCache<E> {
         (num, whitespace_end, width, line)
     }
 
-    /// Returns the first line num and the max width in chars of the `line_nums` from `line_id`` range
+    /// Returns the first line num and the max width in chars of the `line_nums` from `line_id` range
     fn get_start_info(&self, line_ids: &Range<usize>) -> (usize, usize) {
         let (line_num, _, _, _) = self.lookup(line_ids.start);
         let line_num_width = (line_num + line_ids.len() - 1)

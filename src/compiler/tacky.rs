@@ -311,7 +311,7 @@ impl<'src> AsmConverter {
             .map(|fun| self.fill_function(fun))
             .collect();
 
-        asm::Program { globals, functions }
+        asm::Program { functions, globals }
     }
 
     fn fill_global(&mut self, global: asm::GlobalVar<'src>) -> asm::GlobalVar<'src> {
@@ -370,7 +370,7 @@ impl<'src> AsmConverter {
             .map(|fun| self.fix_function(fun))
             .collect();
 
-        asm::Program { globals, functions }
+        asm::Program { functions, globals }
     }
 
     fn fix_function(&self, fun: asm::Function<'src>) -> asm::Function<'src> {

@@ -10,3 +10,9 @@ No backend symbol table:
 
 Compilation multithreading should be thread pooling. Worker threads ask for tlu and return results using channels
 Temp directories
+
+Parser should output Items, since order of fn and global var matters.
+Stmt and ExprTy and Inst? should hold structs that each implement some trait (TyCheck, Fill, Fix)
+- These trait fn would take in a Fixer or Converter, or TyChecker helper
+Pretty print should would like Register Display
+Make ast pretty print better: potentially switch to printing explicit src program?

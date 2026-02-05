@@ -71,14 +71,14 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             .map(|global| self.resolve_global(global))
             .collect();
 
-        if !self.errors.is_empty() {
+        if self.errors.is_empty() {
+            Ok(TypedProgram { functions, globals })
+        } else {
             Err(CompileError::from_semantic_errors(
                 src,
                 src_path,
                 self.errors,
             ))
-        } else {
-            Ok(TypedProgram { functions, globals })
         }
     }
 
@@ -160,7 +160,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             }
             Stmt::Expr(expr) => TypedStmt::Expr(self.resolve_expr(*expr)),
             Stmt::Decl(ident, ty, init) => {
-                if self.var_map.in_scope(ident.name) {
+                if self.var_map.in_scope(&ident.name) {
                     self.log_err(ident.ctx, SemanticError::DuplicateDecl);
                 } else {
                     let local = self.new_local();
@@ -292,7 +292,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 
     fn resolve_var(&mut self, name: Interned<'src, str>, ctx: Context) -> TypedExpr<'src, 'a> {
-        match self.var_map.get(name) {
+        match self.var_map.get(&name) {
             None => self.error(ctx, SemanticError::UndeclaredVar),
             Some(&SymbolInfo {
                 ty,
@@ -312,6 +312,6 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 }
 
-fn is_lvalue<'src, 'a>(expr: &Expr<'src, 'a>) -> bool {
+fn is_lvalue(expr: &Expr<'_, '_>) -> bool {
     matches!(&expr.expr, &ExprTy::Var(_))
 }

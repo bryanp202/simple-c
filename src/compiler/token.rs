@@ -86,24 +86,22 @@ pub enum Precedence {
 
 impl Precedence {
     pub const fn up(self) -> Self {
-        use Precedence::*;
         match self {
-            None => Assignment,
-            Assignment => Conditional,
-            Conditional => LogicOr,
-            LogicOr => LogicAnd,
-            LogicAnd => BitOr,
-            BitOr => BitXor,
-            BitXor => BitAnd,
-            BitAnd => Equality,
-            Equality => Relational,
-            Relational => Shift,
-            Shift => Term,
-            Term => Product,
-            Product => Unary,
-            Unary => Postfix,
-            Postfix => Primary,
-            Primary => Primary,
+            Precedence::None => Precedence::Assignment,
+            Precedence::Assignment => Precedence::Conditional,
+            Precedence::Conditional => Precedence::LogicOr,
+            Precedence::LogicOr => Precedence::LogicAnd,
+            Precedence::LogicAnd => Precedence::BitOr,
+            Precedence::BitOr => Precedence::BitXor,
+            Precedence::BitXor => Precedence::BitAnd,
+            Precedence::BitAnd => Precedence::Equality,
+            Precedence::Equality => Precedence::Relational,
+            Precedence::Relational => Precedence::Shift,
+            Precedence::Shift => Precedence::Term,
+            Precedence::Term => Precedence::Product,
+            Precedence::Product => Precedence::Unary,
+            Precedence::Unary => Precedence::Postfix,
+            Precedence::Postfix | Precedence::Primary => Precedence::Primary,
         }
     }
 }

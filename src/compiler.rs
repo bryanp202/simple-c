@@ -53,7 +53,7 @@ fn compile_units(args: &CompileArgs) -> (Vec<OsString>, Vec<CompileError>) {
     let thread_count = args.threads as usize;
 
     for (batch_num, src_paths) in args.source.chunks(thread_count).enumerate() {
-        for (unit_num, src_path) in src_paths.into_iter().enumerate() {
+        for (unit_num, src_path) in src_paths.iter().enumerate() {
             let src_path = src_path.clone();
             let module_num = batch_num * thread_count + unit_num;
             let handle =

@@ -75,22 +75,22 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             }
         }
 
-        if !self.errors.is_empty() {
+        if self.errors.is_empty() {
+            Ok(Program {
+                globals: self.globals,
+                functions,
+            })
+        } else {
             Err(CompileError::from_syntax_errors(
                 self.src,
                 src_path,
                 self.errors,
             ))
-        } else {
-            Ok(Program {
-                globals: self.globals,
-                functions,
-            })
         }
     }
 }
 
-impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
+impl<'src, 'a> Parser<'src, 'a, '_> {
     #[inline]
     fn alloc_stmt(&self, stmt: Stmt<'src, 'a>) -> Box<Stmt<'src, 'a>, Alloc<'a>> {
         Box::new_in(stmt, self.ast_arena)
@@ -167,7 +167,12 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
             if matches!(
                 self.curr.ty,
-                TokenTy::OpenBrace | TokenTy::Semicolon | TokenTy::CloseBrace | TokenTy::If | TokenTy::Else | TokenTy::Return
+                TokenTy::OpenBrace
+                    | TokenTy::Semicolon
+                    | TokenTy::CloseBrace
+                    | TokenTy::If
+                    | TokenTy::Else
+                    | TokenTy::Return
             ) {
                 break;
             }
@@ -236,7 +241,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             TokenTy::Int => true,
             TokenTy::Identifier => {
                 let id = self.intern_next();
-                self.types.get(id).is_some()
+                self.types.get(&id).is_some()
             }
             _ => false,
         }
@@ -248,7 +253,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         }
         let id = self.intern_prev();
 
-        self.types.get(id).copied().unwrap_or_else(|| {
+        self.types.get(&id).copied().unwrap_or_else(|| {
             self.log_err(self.error(SyntaxError::UnknownSymbol));
             self.synchronize();
             self.ty_interner.intern(Ty::Poisoned)
@@ -276,7 +281,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 }
 
 /// Statements
-impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
+impl<'src, 'a> Parser<'src, 'a, '_> {
     fn declaration(&mut self) -> Option<Stmt<'src, 'a>> {
         if let TokenTy::Typedef = self.peek() {
             self.typedef();
@@ -464,7 +469,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             _ => unreachable!("invalid tokenty {:?} reached assignment", self.prev.ty),
         };
         let rhs = self.expr_with_precedence(Precedence::Assignment);
-        let ctx = Context::from_sub(lhs.ctx.clone(), rhs.ctx.clone());
+        let ctx = Context::from_sub(&lhs.ctx, &rhs.ctx);
         Expr {
             expr: ExprTy::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs)),
             ctx,
@@ -475,7 +480,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let then_branch = self.expr();
         self.eat(TokenTy::Colon, SyntaxError::ExpectedColon);
         let else_branch = self.expr_with_precedence(Precedence::Conditional);
-        let ctx = Context::from_sub(cond.ctx.clone(), else_branch.ctx.clone());
+        let ctx = Context::from_sub(&cond.ctx, &else_branch.ctx);
 
         Expr {
             expr: ExprTy::Ternary(
@@ -518,7 +523,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         };
 
         let rhs = self.expr_with_precedence(prec.up());
-        let ctx = Context::from_sub(lhs.ctx.clone(), rhs.ctx.clone());
+        let ctx = Context::from_sub(&lhs.ctx, &rhs.ctx);
         Expr {
             expr: ExprTy::Binary(op, self.alloc_expr(lhs), self.alloc_expr(rhs)),
             ctx,
@@ -539,7 +544,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         };
         let op_ctx = self.prev.ctx.clone();
         let operand = self.expr_with_precedence(Precedence::Unary);
-        let ctx = Context::from_sub(op_ctx, operand.ctx.clone());
+        let ctx = Context::from_sub(&op_ctx, &operand.ctx);
         Expr {
             expr: ExprTy::Unary(op, self.alloc_expr(operand)),
             ctx,
@@ -547,7 +552,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     }
 
     fn postfix(&mut self, operand: Expr<'src, 'a>) -> Expr<'src, 'a> {
-        let ctx = Context::from_sub(operand.ctx.clone(), self.prev.ctx.clone());
+        let ctx = Context::from_sub(&operand.ctx, &self.prev.ctx);
         match self.prev.ty {
             TokenTy::PlusPlus => Expr {
                 expr: ExprTy::DecInc(UnaryOp::Increment, self.alloc_expr(operand)),
@@ -563,17 +568,16 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
     fn constant(&mut self) -> Expr<'src, 'a> {
         self.advance_unchecked();
-        match self.get_src_str(&self.prev).parse() {
-            Ok(cnst) => Expr {
+        if let Ok(cnst) = self.get_src_str(&self.prev).parse() {
+            Expr {
                 expr: ExprTy::Constant(cnst),
                 ctx: self.prev.ctx.clone(),
-            },
-            Err(_) => {
-                self.log_err(self.error(SyntaxError::IntegerLiteralTooLarge));
-                Expr {
-                    expr: ExprTy::Poisoned,
-                    ctx: self.prev.ctx.clone(),
-                }
+            }
+        } else {
+            self.log_err(self.error(SyntaxError::IntegerLiteralTooLarge));
+            Expr {
+                expr: ExprTy::Poisoned,
+                ctx: self.prev.ctx.clone(),
             }
         }
     }
@@ -592,7 +596,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let op_ctx = self.prev.ctx.clone();
         let Expr { expr, .. } = self.expr();
         self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
-        let ctx = Context::from_sub(op_ctx, self.prev.ctx.clone());
+        let ctx = Context::from_sub(&op_ctx, &self.prev.ctx);
         Expr { expr, ctx }
     }
 }

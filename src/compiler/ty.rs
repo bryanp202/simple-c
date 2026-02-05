@@ -5,8 +5,7 @@ use crate::intern::{Interned, InternedArena, Interner};
 pub type TyInterner<'s, 'a> = InternedArena<'a, 'static, Ty<'s, 'a>>;
 pub type TyStack<'s, 'a> = ScopeStack<Interned<'s, str>, Interned<'a, Ty<'s, 'a>>>;
 
-const BUILT_IN_TYPES: [(&'static str, Ty<'static, 'static>); 2] =
-    [("int", Ty::Int), ("", Ty::Poisoned)];
+const BUILT_IN_TYPES: [(&str, Ty<'static, 'static>); 2] = [("int", Ty::Int), ("", Ty::Poisoned)];
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum Ty<'src, 'a> {
@@ -22,7 +21,7 @@ pub enum Ty<'src, 'a> {
     Poisoned,
 }
 
-impl<'src, 'a> Display for Ty<'src, 'a> {
+impl Display for Ty<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int => write!(f, "int"),
@@ -75,17 +74,17 @@ impl<K: PartialEq + Eq, V> ScopeStack<K, V> {
         self.stack.push((key, item));
     }
 
-    pub fn in_scope(&self, key: K) -> bool {
+    pub fn in_scope(&self, key: &K) -> bool {
         self.stack[self.scope_bottom..]
             .iter()
-            .any(|(k, _)| *k == key)
+            .any(|(k, _)| k == key)
     }
 
-    pub fn get(&self, key: K) -> Option<&V> {
+    pub fn get(&self, key: &K) -> Option<&V> {
         self.stack
             .iter()
             .rev()
-            .find(|(k, _)| key == *k)
+            .find(|(k, _)| key == k)
             .map(|(_, val)| val)
     }
 }

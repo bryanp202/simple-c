@@ -16,7 +16,7 @@ pub trait PrettyPrint {
 pub fn pretty_print(item: impl Display, name: &'static str, src_path: &Path) {
     let mut buf = BufWriter::new(std::io::stderr());
     write!(&mut buf, "{}:\n{item}", src_path.display()).unwrap_or_else(|err| {
-        eprintln!("{err}: failed to print {name} for: {}", src_path.display())
+        eprintln!("{err}: failed to print {name} for: {}", src_path.display());
     });
 }
 
@@ -128,8 +128,8 @@ impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
                     writeln!(f)?;
                 }
             }
-            Self::Decl(ident, ty, init) => {
-                writeln!(f, "Decl {} {} {{", ty.get(), ident.name.get())?;
+            Self::Decl(id, ty, init) => {
+                writeln!(f, "Decl {} {} {{", ty.get(), id.name.get())?;
                 if let Some(init) = init {
                     init.pretty(f, indent + 1)?;
                 }
