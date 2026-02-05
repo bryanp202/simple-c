@@ -142,8 +142,10 @@ impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
                 writeln!(f, "If {{")?;
                 condition.pretty(f, indent + 1)?;
                 then_branch.pretty(f, indent + 1)?;
+                writeln!(f)?;
                 if let Some(else_branch) = else_branch {
                     else_branch.pretty(f, indent + 1)?;
+                    writeln!(f)?;
                 }
             }
             Self::Nil => return write!(f, "Nil"),
@@ -167,6 +169,13 @@ impl<A: Allocator> PrettyPrint for ast::ExprTy<'_, A> {
         let spaces = indent * INDENT_SPACES;
         write!(f, "{: >spaces$}Expr: ", "")?;
         match self {
+            Self::Ternary(cond, then_branch, else_branch) => {
+                writeln!(f, "Ternary?: {{")?;
+                cond.pretty(f, indent + 1)?;
+                then_branch.pretty(f, indent + 1)?;
+                else_branch.pretty(f, indent + 1)?;
+                writeln!(f, "{: >spaces$}}},", "")
+            }
             Self::Assign(op, lhs, rhs) => {
                 writeln!(f, "Assign{op} {{")?;
                 lhs.pretty(f, indent + 1)?;

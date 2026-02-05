@@ -67,8 +67,8 @@ pub enum TokenTy {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Precedence {
     None,
-    Conditional,
     Assignment,
+    Conditional,
     LogicOr,
     LogicAnd,
     BitOr,
@@ -88,9 +88,9 @@ impl Precedence {
     pub const fn up(self) -> Self {
         use Precedence::*;
         match self {
-            None => Conditional,
-            Conditional => Assignment,
-            Assignment => LogicOr,
+            None => Assignment,
+            Assignment => Conditional,
+            Conditional => LogicOr,
             LogicOr => LogicAnd,
             LogicAnd => BitOr,
             BitOr => BitXor,
@@ -111,7 +111,11 @@ impl Precedence {
 impl TokenTy {
     pub const fn anyfix_precedence(self) -> Precedence {
         match self {
-            TokenTy::PlusPlus | TokenTy::MinusMinus => Precedence::Postfix,
+            TokenTy::Dot
+            | TokenTy::OpenSquare
+            | TokenTy::OpenParen
+            | TokenTy::PlusPlus
+            | TokenTy::MinusMinus => Precedence::Postfix,
             TokenTy::Star | TokenTy::Slash | TokenTy::Percent => Precedence::Product,
             TokenTy::Plus | TokenTy::Minus => Precedence::Term,
             TokenTy::GreaterGreater | TokenTy::LessLess => Precedence::Shift,
@@ -124,7 +128,6 @@ impl TokenTy {
             TokenTy::Pipe => Precedence::BitOr,
             TokenTy::AmpersandAmpersand => Precedence::LogicAnd,
             TokenTy::PipePipe => Precedence::LogicOr,
-            TokenTy::Dot | TokenTy::OpenSquare | TokenTy::OpenParen => Precedence::Postfix,
             TokenTy::QuestionMark => Precedence::Conditional,
             TokenTy::Equal
             | TokenTy::PlusEqual

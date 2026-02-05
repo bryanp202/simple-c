@@ -42,6 +42,11 @@ pub struct Expr<'src, 'a, A: Allocator> {
 }
 
 pub enum ExprTy<'src, 'a, A: Allocator> {
+    Ternary(
+        Box<Expr<'src, 'a, A>, A>,
+        Box<Expr<'src, 'a, A>, A>,
+        Box<Expr<'src, 'a, A>, A>,
+    ),
     Assign(
         AssignOp,
         Box<Expr<'src, 'a, A>, A>,

@@ -441,6 +441,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
             expr = match new_prec {
                 Precedence::Assignment => self.assignment(expr),
+                Precedence::Conditional => self.ternary(expr),
                 Precedence::Postfix => self.postfix(expr),
                 new_prec => self.binary(expr, new_prec),
             }
@@ -466,6 +467,22 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let ctx = Context::from_sub(lhs.ctx.clone(), rhs.ctx.clone());
         Expr {
             expr: ExprTy::Assign(op, self.alloc_expr(lhs), self.alloc_expr(rhs)),
+            ctx,
+        }
+    }
+
+    fn ternary(&mut self, cond: Expr<'src, 'a>) -> Expr<'src, 'a> {
+        let then_branch = self.expr();
+        self.eat(TokenTy::Colon, SyntaxError::ExpectedColon);
+        let else_branch = self.expr_with_precedence(Precedence::Conditional);
+        let ctx = Context::from_sub(cond.ctx.clone(), else_branch.ctx.clone());
+
+        Expr {
+            expr: ExprTy::Ternary(
+                self.alloc_expr(cond),
+                self.alloc_expr(then_branch),
+                self.alloc_expr(else_branch),
+            ),
             ctx,
         }
     }

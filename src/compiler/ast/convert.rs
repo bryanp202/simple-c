@@ -117,9 +117,9 @@ impl<'src, 'a> Converter {
             }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
             Stmt::If(condition, then_branch, else_branch) => {
-                let dst = self.expr(*condition, insts);
+                let cond_result = self.expr(*condition, insts);
                 let else_label = self.new_label();
-                insts.push(tacky::Inst::JumpIfZero(dst, else_label));
+                insts.push(tacky::Inst::JumpIfZero(cond_result, else_label));
                 self.stmt(*then_branch, insts);
 
                 if let Some(else_branch) = else_branch {
@@ -146,6 +146,9 @@ impl<'src, 'a> Converter {
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
         match expr.expr {
+            ExprTy::Ternary(cond, then_branch, else_branch) => {
+                self.ternary(*cond, *then_branch, *else_branch, insts)
+            }
             ExprTy::Assign(op, lhs, rhs) => self.assign(op, *lhs, *rhs, insts),
             ExprTy::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
             ExprTy::Unary(op, expr) => self.unary(op, *expr, insts),
@@ -155,6 +158,37 @@ impl<'src, 'a> Converter {
             ExprTy::Constant(imm) => tacky::Val::Const(imm),
             ExprTy::Poisoned => unreachable!("Attempted to convert poison ast node"),
         }
+    }
+
+    fn ternary(
+        &mut self,
+        cond: Expr<'src, 'a>,
+        then_branch: Expr<'src, 'a>,
+        else_branch: Expr<'src, 'a>,
+        insts: &mut Vec<tacky::Inst<'src>>,
+    ) -> tacky::Val<'src> {
+        let dst = self.new_temp();
+        let cond_result = self.expr(cond, insts);
+        let else_label = self.new_label();
+        insts.push(tacky::Inst::JumpIfZero(cond_result, else_label));
+
+        let then_result = self.expr(then_branch, insts);
+        insts.push(tacky::Inst::Copy {
+            src: then_result,
+            dst,
+        });
+        let end_label = self.new_label();
+        insts.push(tacky::Inst::Jump(end_label));
+
+        insts.push(tacky::Inst::Label(else_label));
+        let else_result = self.expr(else_branch, insts);
+        insts.push(tacky::Inst::Copy {
+            src: else_result,
+            dst,
+        });
+        insts.push(tacky::Inst::Label(end_label));
+
+        dst
     }
 
     fn assign(

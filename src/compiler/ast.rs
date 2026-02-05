@@ -59,6 +59,11 @@ pub struct Expr<'src, A: Allocator> {
 }
 
 pub enum ExprTy<'src, A: Allocator> {
+    Ternary(
+        Box<Expr<'src, A>, A>,
+        Box<Expr<'src, A>, A>,
+        Box<Expr<'src, A>, A>,
+    ), // condition, then_branch, else_branch
     Assign(AssignOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand

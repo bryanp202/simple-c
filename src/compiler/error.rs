@@ -159,6 +159,7 @@ pub struct ErrorWithCtx<E: Display> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SyntaxError {
+    ExpectedColon,
     ExpectedFunctionArgs,
     ExpectedIdentifier,
     ExpectedOpenParen,
@@ -174,6 +175,7 @@ pub enum SyntaxError {
 impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
+            Self::ExpectedColon => "expected a ':' after conditional then branch",
             Self::ExpectedFunctionArgs => "expected function args after function identifier",
             Self::ExpectedIdentifier => "expected an identifier",
             Self::ExpectedOpenParen => "expected a '('",

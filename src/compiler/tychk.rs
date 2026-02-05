@@ -194,6 +194,9 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         Expr { expr, ctx }: Expr<'src, 'a>,
     ) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
         let typed = match expr {
+            ExprTy::Ternary(cond, then_branch, else_branch) => {
+                self.resolve_ternary(*cond, *then_branch, *else_branch)
+            }
             ExprTy::Assign(op, lhs, rhs) => self.resolve_assign(op, *lhs, *rhs),
             ExprTy::Binary(op, lhs, rhs) => self.resolve_binary(op, *lhs, *rhs),
             ExprTy::Unary(op, operand) => self.resolve_unary(op, *operand),
@@ -209,6 +212,23 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             },
         };
         self.alloc_expr(typed)
+    }
+
+    fn resolve_ternary(
+        &mut self,
+        cond: Expr<'src, 'a>,
+        then_branch: Expr<'src, 'a>,
+        else_branch: Expr<'src, 'a>,
+    ) -> TypedExpr<'src, 'a> {
+        let cond = self.resolve_expr(cond);
+        let then_branch = self.resolve_expr(then_branch);
+        let else_branch = self.resolve_expr(else_branch);
+        let ty = self.common_type(then_branch.ty, else_branch.ty);
+
+        TypedExpr {
+            expr: TypedExprTy::Ternary(cond, then_branch, else_branch),
+            ty,
+        }
     }
 
     fn resolve_assign(
