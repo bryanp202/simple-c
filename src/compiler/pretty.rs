@@ -138,6 +138,14 @@ impl<A: Allocator> PrettyPrint for ast::Stmt<'_, '_, A> {
                 writeln!(f, "Expr {{ ")?;
                 expr.pretty(f, indent + 1)?;
             }
+            Self::If(condition, then_branch, else_branch) => {
+                writeln!(f, "If {{")?;
+                condition.pretty(f, indent + 1)?;
+                then_branch.pretty(f, indent + 1)?;
+                if let Some(else_branch) = else_branch {
+                    else_branch.pretty(f, indent + 1)?;
+                }
+            }
             Self::Nil => return write!(f, "Nil"),
             Self::Return(expr) => {
                 writeln!(f, "Return {{ ")?;

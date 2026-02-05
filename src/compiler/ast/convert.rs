@@ -116,6 +116,22 @@ impl<'src, 'a> Converter {
                 }
             }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
+            Stmt::If(condition, then_branch, else_branch) => {
+                let dst = self.expr(*condition, insts);
+                let else_label = self.new_label();
+                insts.push(tacky::Inst::JumpIfZero(dst, else_label));
+                self.stmt(*then_branch, insts);
+
+                if let Some(else_branch) = else_branch {
+                    let end_label = self.new_label();
+                    insts.push(tacky::Inst::Jump(end_label));
+                    insts.push(tacky::Inst::Label(else_label));
+                    self.stmt(*else_branch, insts);
+                    insts.push(tacky::Inst::Label(end_label));
+                } else {
+                    insts.push(tacky::Inst::Label(else_label));
+                }
+            }
             Stmt::Nil => {} // Do nothing
             Stmt::Return(expr) => {
                 let src = self.expr(*expr, insts);

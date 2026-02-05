@@ -39,7 +39,7 @@ struct CompileArgs {
     /// Compile with no output
     #[arg(short = 'c', long = "check")]
     check_only: bool,
-    /// Number of threads for compilation
+    /// Number of threads for compilation (1..=16)
     #[arg(long, default_value = "4", value_parser = clap::value_parser!(u16).range(1..=16), require_equals = true)]
     threads: u16,
 }

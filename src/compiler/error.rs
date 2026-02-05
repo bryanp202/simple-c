@@ -161,6 +161,7 @@ pub struct ErrorWithCtx<E: Display> {
 pub enum SyntaxError {
     ExpectedFunctionArgs,
     ExpectedIdentifier,
+    ExpectedOpenParen,
     ExpectedSemicolon,
     IntegerLiteralTooLarge,
     InvalidExpr,
@@ -175,6 +176,7 @@ impl Display for SyntaxError {
         let msg = match self {
             Self::ExpectedFunctionArgs => "expected function args after function identifier",
             Self::ExpectedIdentifier => "expected an identifier",
+            Self::ExpectedOpenParen => "expected a '('",
             Self::ExpectedSemicolon => "expected a ';'",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidExpr => "invalid expression",

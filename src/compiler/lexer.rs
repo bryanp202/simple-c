@@ -212,15 +212,25 @@ impl Lexer<'_> {
     /// Check if keyword, else emit identifier
     fn identifier(&mut self, c: char) -> TokenTy {
         match c {
-            'i' => self.check_keyword(TokenTy::Int, "nt"),
-            'r' => self.check_keyword(TokenTy::Return, "eturn"),
-            't' => self.check_keyword(TokenTy::Typedef, "ypedef"),
-            'v' => self.check_keyword(TokenTy::Void, "oid"),
-            _ => {
-                self.eat_while(char::is_alphanumeric);
-                TokenTy::Identifier
-            }
+            'e' => return self.check_keyword(TokenTy::Else, "lse"),
+            'i' => match self.peek() {
+                'f' => {
+                    self.advance();
+                    return self.check_keyword(TokenTy::If, "");
+                }
+                'n' => {
+                    self.advance();
+                    return self.check_keyword(TokenTy::Int, "t");
+                }
+                _ => {}
+            },
+            'r' => return self.check_keyword(TokenTy::Return, "eturn"),
+            't' => return self.check_keyword(TokenTy::Typedef, "ypedef"),
+            'v' => return self.check_keyword(TokenTy::Void, "oid"),
+            _ => {}
         }
+        self.eat_while(char::is_alphanumeric);
+        TokenTy::Identifier
     }
 
     /// Check if the rest remaining alphanumeric chars make up the target keyword

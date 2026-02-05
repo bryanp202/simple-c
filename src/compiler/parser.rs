@@ -92,6 +92,11 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
 impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     #[inline]
+    fn alloc_stmt(&self, stmt: Stmt<'src, 'a>) -> Box<Stmt<'src, 'a>, Alloc<'a>> {
+        Box::new_in(stmt, self.ast_arena)
+    }
+
+    #[inline]
     fn alloc_expr(&self, expr: Expr<'src, 'a>) -> Box<Expr<'src, 'a>, Alloc<'a>> {
         Box::new_in(expr, self.ast_arena)
     }
@@ -186,6 +191,8 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         self.prev.ty
     }
 
+    /// Attempt to advance, consuming an expected tokenty
+    /// - Logs an err and syncing on mismatch
     #[inline]
     fn eat(&mut self, expected: TokenTy, err: SyntaxError) -> bool {
         if self.check(expected) {
@@ -194,6 +201,19 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         } else {
             self.log_err(self.error_at(err));
             self.synchronize();
+            false
+        }
+    }
+
+    /// Attempt to advance, consuming an expected tokenty
+    /// - Logs an err on mismatch but doesnt sync
+    #[inline]
+    fn eat_no_sync(&mut self, expected: TokenTy, err: SyntaxError) -> bool {
+        if self.check(expected) {
+            self.advance_unchecked();
+            true
+        } else {
+            self.log_err(self.error_at(err));
             false
         }
     }
@@ -301,10 +321,32 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
     fn stmt(&mut self) -> Stmt<'src, 'a> {
         match self.peek() {
+            TokenTy::If => self.if_stmt(),
             TokenTy::OpenBrace => self.block(),
             TokenTy::Return => self.ret(),
             _ => self.expr_stmt(),
         }
+    }
+
+    fn if_stmt(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        self.eat_no_sync(TokenTy::OpenParen, SyntaxError::ExpectedOpenParen);
+        let condition = self.expr();
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
+        let then_branch = self.stmt();
+        let else_branch = if self.eat_if(TokenTy::Else) {
+            let else_branch = self.stmt();
+            Some(self.alloc_stmt(else_branch))
+        } else {
+            None
+        };
+
+        Stmt::If(
+            self.alloc_expr(condition),
+            self.alloc_stmt(then_branch),
+            else_branch,
+        )
     }
 
     fn block(&mut self) -> Stmt<'src, 'a> {
@@ -498,7 +540,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
                 expr: ExprTy::DecInc(UnaryOp::Decrement, self.alloc_expr(operand)),
                 ctx,
             },
-            _ => unreachable!(),
+            _ => unreachable!("{:?}", self.prev.ty),
         }
     }
 

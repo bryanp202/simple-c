@@ -9,3 +9,4 @@ No backend symbol table:
 - TypedAst has local and global nodes. local nodes are just unique numbers and global are interned str
 
 Compilation multithreading should be thread pooling. Worker threads ask for tlu and return results using channels
+Temp directories

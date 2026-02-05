@@ -7,6 +7,8 @@ pub enum TokenTy {
     Const,
     Identifier,
     // Keywords
+    Else,
+    If,
     Int,
     Return,
     Typedef,

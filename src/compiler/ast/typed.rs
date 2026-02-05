@@ -27,6 +27,11 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Block(Vec<Stmt<'src, 'a, A>>),
     Decl(Option<Box<Expr<'src, 'a, A>, A>>),
     Expr(Box<Expr<'src, 'a, A>, A>),
+    If(
+        Box<Expr<'src, 'a, A>, A>,
+        Box<Stmt<'src, 'a, A>, A>,
+        Option<Box<Stmt<'src, 'a, A>, A>>,
+    ),
     Nil,
     Return(Box<Expr<'src, 'a, A>, A>),
 }

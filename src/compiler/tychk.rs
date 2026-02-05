@@ -109,6 +109,11 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 
     #[inline]
+    fn alloc_stmt(&self, stmt: TypedStmt<'src, 'a>) -> Box<TypedStmt<'src, 'a>, Alloc<'a>> {
+        Box::new_in(stmt, self.ast_arena)
+    }
+
+    #[inline]
     fn alloc_expr(&self, expr: TypedExpr<'src, 'a>) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
         Box::new_in(expr, self.ast_arena)
     }
@@ -170,6 +175,14 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 
                 let init = init.map(|expr| self.resolve_expr(*expr));
                 TypedStmt::Decl(init)
+            }
+            Stmt::If(condition, then_branch, else_branch) => {
+                let condition = self.resolve_expr(*condition);
+                let then_branch = self.resolve_stmt(*then_branch);
+                let else_branch = else_branch
+                    .map(|stmt| self.resolve_stmt(*stmt))
+                    .map(|stmt| self.alloc_stmt(stmt));
+                TypedStmt::If(condition, self.alloc_stmt(then_branch), else_branch)
             }
             Stmt::Nil => TypedStmt::Nil,
             Stmt::Return(expr) => TypedStmt::Return(self.resolve_expr(*expr)),
