@@ -167,7 +167,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
             if matches!(
                 self.curr.ty,
-                TokenTy::OpenBrace | TokenTy::Semicolon | TokenTy::CloseBrace
+                TokenTy::OpenBrace | TokenTy::Semicolon | TokenTy::CloseBrace | TokenTy::If | TokenTy::Else | TokenTy::Return
             ) {
                 break;
             }
