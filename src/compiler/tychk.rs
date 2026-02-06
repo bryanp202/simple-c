@@ -64,8 +64,8 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 
         for item in ast_program.items {
             match item {
-                Item::Fn(fun) => functions.push(self.resolve_fn(fun)),
-                Item::Var(global) => globals.push(self.resolve_global(global)),
+                Item::Fn(fun) => functions.push(self.function(fun)),
+                Item::Var(global) => globals.push(self.global(global)),
             }
         }
 
@@ -111,11 +111,6 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         Box::new_in(stmt, self.ast_arena)
     }
 
-    #[inline]
-    fn alloc_expr(&self, expr: TypedExpr<'src, 'a>) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
-        Box::new_in(expr, self.ast_arena)
-    }
-
     fn common_type(
         &self,
         lhs: Interned<'a, Ty<'src, 'a>>,
@@ -126,18 +121,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 }
 
 impl<'src, 'a> TyChecker<'src, 'a> {
-    fn resolve_global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
+    fn global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
         TypedGlobalVar { name: global.name }
     }
 
-    fn resolve_fn(&mut self, fun: Function<'src, 'a>) -> TypedFunction<'src, 'a> {
+    fn function(&mut self, fun: Function<'src, 'a>) -> TypedFunction<'src, 'a> {
         let Function { name, body } = fun;
         self.reset_for_fn();
 
-        let body = body
-            .into_iter()
-            .map(|stmt| self.resolve_stmt(stmt))
-            .collect();
+        let body = body.into_iter().map(|stmt| self.stmt(stmt)).collect();
         TypedFunction {
             name,
             body,
@@ -145,18 +137,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_stmt(&mut self, stmt: Stmt<'src, 'a>) -> TypedStmt<'src, 'a> {
+    fn stmt(&mut self, stmt: Stmt<'src, 'a>) -> TypedStmt<'src, 'a> {
         match stmt {
             Stmt::Block(stmts) => {
                 let old_scope_bottom = self.var_map.enter_scope();
-                let stmts = stmts
-                    .into_iter()
-                    .map(|stmt| self.resolve_stmt(stmt))
-                    .collect();
+                let stmts = stmts.into_iter().map(|stmt| self.stmt(stmt)).collect();
                 self.var_map.exit_scope(old_scope_bottom);
                 TypedStmt::Block(stmts)
             }
-            Stmt::Expr(expr) => TypedStmt::Expr(self.resolve_expr(*expr)),
+            Stmt::Expr(expr) => TypedStmt::Expr(self.expr(*expr)),
             Stmt::Decl(ident, ty, init) => {
                 if self.var_map.in_scope(&ident.name) {
                     self.log_err(ident.ctx, SemanticError::DuplicateDecl);
@@ -171,35 +160,32 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     );
                 }
 
-                let init = init.map(|expr| self.resolve_expr(*expr));
+                let init = init.map(|expr| self.expr(*expr));
                 TypedStmt::Decl(init)
             }
             Stmt::If(condition, then_branch, else_branch) => {
-                let condition = self.resolve_expr(*condition);
-                let then_branch = self.resolve_stmt(*then_branch);
+                let condition = self.expr(*condition);
+                let then_branch = self.stmt(*then_branch);
                 let else_branch = else_branch
-                    .map(|stmt| self.resolve_stmt(*stmt))
+                    .map(|stmt| self.stmt(*stmt))
                     .map(|stmt| self.alloc_stmt(stmt));
                 TypedStmt::If(condition, self.alloc_stmt(then_branch), else_branch)
             }
             Stmt::Nil => TypedStmt::Nil,
-            Stmt::Return(expr) => TypedStmt::Return(self.resolve_expr(*expr)),
+            Stmt::Return(expr) => TypedStmt::Return(self.expr(*expr)),
         }
     }
 
-    fn resolve_expr(
-        &mut self,
-        Expr { expr, ctx }: Expr<'src, 'a>,
-    ) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
+    fn expr(&mut self, Expr { expr, ctx }: Expr<'src, 'a>) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {
         let typed = match expr {
             ExprTy::Ternary(cond, then_branch, else_branch) => {
-                self.resolve_ternary(*cond, *then_branch, *else_branch)
+                self.ternary(*cond, *then_branch, *else_branch)
             }
-            ExprTy::Assign(op, lhs, rhs) => self.resolve_assign(op, *lhs, *rhs),
-            ExprTy::Binary(op, lhs, rhs) => self.resolve_binary(op, *lhs, *rhs),
-            ExprTy::Unary(op, operand) => self.resolve_unary(op, *operand),
-            ExprTy::DecInc(op, operand) => self.resolve_decinc(op, *operand),
-            ExprTy::Var(name) => self.resolve_var(name, ctx),
+            ExprTy::Assign(op, lhs, rhs) => self.assign(op, *lhs, *rhs),
+            ExprTy::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs),
+            ExprTy::Unary(op, operand) => self.unary(op, *operand),
+            ExprTy::DecInc(op, operand) => self.decinc(op, *operand),
+            ExprTy::Var(name) => self.variable(name, ctx),
             ExprTy::Constant(imm) => TypedExpr {
                 expr: TypedExprTy::Constant(imm),
                 ty: self.poisoned_ty,
@@ -209,18 +195,18 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 ty: self.poisoned_ty,
             },
         };
-        self.alloc_expr(typed)
+        Box::new_in(typed, self.ast_arena)
     }
 
-    fn resolve_ternary(
+    fn ternary(
         &mut self,
         cond: Expr<'src, 'a>,
         then_branch: Expr<'src, 'a>,
         else_branch: Expr<'src, 'a>,
     ) -> TypedExpr<'src, 'a> {
-        let cond = self.resolve_expr(cond);
-        let then_branch = self.resolve_expr(then_branch);
-        let else_branch = self.resolve_expr(else_branch);
+        let cond = self.expr(cond);
+        let then_branch = self.expr(then_branch);
+        let else_branch = self.expr(else_branch);
         let ty = self.common_type(then_branch.ty, else_branch.ty);
 
         TypedExpr {
@@ -229,15 +215,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_assign(
+    fn assign(
         &mut self,
         op: AssignOp,
         lhs: Expr<'src, 'a>,
         rhs: Expr<'src, 'a>,
     ) -> TypedExpr<'src, 'a> {
         if is_lvalue(&lhs) {
-            let lhs = self.resolve_expr(lhs);
-            let rhs = self.resolve_expr(rhs);
+            let lhs = self.expr(lhs);
+            let rhs = self.expr(rhs);
             let ty = self.common_type(lhs.ty, rhs.ty);
             TypedExpr {
                 expr: TypedExprTy::Assign(op, lhs, rhs),
@@ -248,14 +234,14 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_binary(
+    fn binary(
         &mut self,
         op: BinaryOp,
         lhs: Expr<'src, 'a>,
         rhs: Expr<'src, 'a>,
     ) -> TypedExpr<'src, 'a> {
-        let lhs = self.resolve_expr(lhs);
-        let rhs = self.resolve_expr(rhs);
+        let lhs = self.expr(lhs);
+        let rhs = self.expr(rhs);
         let ty = self.common_type(lhs.ty, rhs.ty);
         TypedExpr {
             expr: TypedExprTy::Binary(op, lhs, rhs),
@@ -263,11 +249,11 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_unary(&mut self, op: UnaryOp, operand: Expr<'src, 'a>) -> TypedExpr<'src, 'a> {
+    fn unary(&mut self, op: UnaryOp, operand: Expr<'src, 'a>) -> TypedExpr<'src, 'a> {
         if matches!(op, UnaryOp::Increment | UnaryOp::Decrement) && !is_lvalue(&operand) {
             self.error(operand.ctx, SemanticError::InvalidLValue)
         } else {
-            let operand = self.resolve_expr(operand);
+            let operand = self.expr(operand);
             let ty = operand.ty;
             TypedExpr {
                 expr: TypedExprTy::Unary(op, operand),
@@ -276,9 +262,9 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_decinc(&mut self, op: UnaryOp, operand: Expr<'src, 'a>) -> TypedExpr<'src, 'a> {
+    fn decinc(&mut self, op: UnaryOp, operand: Expr<'src, 'a>) -> TypedExpr<'src, 'a> {
         if is_lvalue(&operand) {
-            let operand = self.resolve_expr(operand);
+            let operand = self.expr(operand);
             let ty = operand.ty;
             TypedExpr {
                 expr: TypedExprTy::DecInc(op, operand),
@@ -289,7 +275,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn resolve_var(&mut self, name: Interned<'src, str>, ctx: Context) -> TypedExpr<'src, 'a> {
+    fn variable(&mut self, name: Interned<'src, str>, ctx: Context) -> TypedExpr<'src, 'a> {
         match self.var_map.get(&name) {
             None => self.error(ctx, SemanticError::UndeclaredVar),
             Some(&SymbolInfo {
