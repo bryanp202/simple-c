@@ -118,20 +118,17 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     ) -> Interned<'a, Ty<'src, 'a>> {
         if lhs == rhs { lhs } else { self.poisoned_ty }
     }
-}
 
-impl<'src, 'a> TyChecker<'src, 'a> {
     fn global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
         TypedGlobalVar { name: global.name }
     }
 
     fn function(&mut self, fun: Function<'src, 'a>) -> TypedFunction<'src, 'a> {
-        let Function { name, body } = fun;
         self.reset_for_fn();
 
-        let body = body.into_iter().map(|stmt| self.stmt(stmt)).collect();
+        let body = fun.body.into_iter().map(|stmt| self.stmt(stmt)).collect();
         TypedFunction {
-            name,
+            name: fun.name,
             body,
             local_count: self.local_count,
         }
