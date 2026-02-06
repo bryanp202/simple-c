@@ -51,7 +51,7 @@ impl<A: Allocator> Display for super::Function<'_, '_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = self.name.get();
         writeln!(f, "fn {name}")?;
-        block(f, &self.body, Level::new())
+        self.body.pretty(f, Level::new())
     }
 }
 
@@ -60,7 +60,7 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
         let spaces = level.to_spaces();
         write!(f, "{: >spaces$}", "")?;
         match self {
-            Self::Block(stmts) => block(f, stmts, level),
+            Self::Block(stmts) => stmts.pretty(f, level),
             Self::Decl(id, ty, init) => {
                 write!(f, "{} {}", ty.get(), id.name.get())?;
                 if let Some(init) = init {
@@ -97,19 +97,17 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
     }
 }
 
-fn block<A: Allocator>(
-    f: &mut std::fmt::Formatter<'_>,
-    stmts: &[super::Stmt<'_, '_, A>],
-    level: Level,
-) -> std::fmt::Result {
-    let spaces = level.to_spaces();
-    let next_level = level.next();
-    writeln!(f, "{{")?;
-    for stmt in stmts {
-        stmt.pretty(f, next_level)?;
-        writeln!(f)?;
+impl<A: Allocator> Pretty for Vec<super::Stmt<'_, '_, A>> {
+    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, level: Level) -> std::fmt::Result {
+        let spaces = level.to_spaces();
+        let next_level = level.next();
+        writeln!(f, "{{")?;
+        for stmt in self {
+            stmt.pretty(f, next_level)?;
+            writeln!(f)?;
+        }
+        write!(f, "{: >spaces$}}}", "")
     }
-    write!(f, "{: >spaces$}}}", "")
 }
 
 impl<A: Allocator> Display for super::Expr<'_, A> {

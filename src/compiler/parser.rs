@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, AssignOp, BinaryOp, Function, GlobalVar, Identifier, UnaryOp},
+        ast::{self, AssignOp, BinaryOp, Function, Identifier, UnaryOp},
         error::{CompileError, Context, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
         token::{Precedence, Token, TokenTy},
