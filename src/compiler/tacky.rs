@@ -3,6 +3,8 @@ use crate::{
     intern::Interned,
 };
 
+mod pretty;
+
 pub struct Program<'src> {
     pub(crate) functions: Vec<Function<'src>>,
     pub(crate) globals: Vec<GlobalVar<'src>>,

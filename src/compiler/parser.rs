@@ -29,7 +29,7 @@ pub struct Parser<'src, 'a, 'ty> {
     prev: Token,
     errors: Vec<SyntaxErrorWithCtx>,
     // Program data
-    globals: Vec<GlobalVar<'src>>,
+    items: Vec<Item<'src, 'a>>,
     types: TyStack<'src, 'a>,
 }
 
@@ -50,36 +50,19 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             curr: Token::new(TokenTy::Eof, 0..0),
             prev: Token::new(TokenTy::Eof, 0..0),
             errors: Vec::new(),
-            globals: Vec::new(),
+            items: Vec::new(),
             types,
         }
     }
 
     pub fn parse(mut self, src_path: PathBuf) -> Result<Program<'src, 'a>, CompileError> {
-        let mut functions = Vec::new();
-
         self.advance_unchecked();
         while !self.at_end() {
-            let Some(item) = self.item() else {
-                return Err(CompileError::from_syntax_errors(
-                    self.src,
-                    src_path,
-                    self.errors,
-                ));
-            };
-
-            match item {
-                Item::Fn { name, body } => {
-                    functions.push(Function { name, body });
-                }
-            }
+            self.item();
         }
 
         if self.errors.is_empty() {
-            Ok(Program {
-                globals: self.globals,
-                functions,
-            })
+            Ok(Program { items: self.items })
         } else {
             Err(CompileError::from_syntax_errors(
                 self.src,
@@ -88,9 +71,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             ))
         }
     }
-}
 
-impl<'src, 'a> Parser<'src, 'a, '_> {
     #[inline]
     fn alloc_stmt(&self, stmt: Stmt<'src, 'a>) -> Box<Stmt<'src, 'a>, Alloc<'a>> {
         Box::new_in(stmt, self.ast_arena)
@@ -260,8 +241,9 @@ impl<'src, 'a> Parser<'src, 'a, '_> {
         })
     }
 
-    fn item(&mut self) -> Option<Item<'src, 'a>> {
-        Some(self.function())
+    fn item(&mut self) {
+        let item = self.function();
+        self.items.push(item);
     }
 
     fn function(&mut self) -> Item<'src, 'a> {
@@ -276,12 +258,9 @@ impl<'src, 'a> Parser<'src, 'a, '_> {
             unreachable!("block parsing returned non-block stmt");
         };
 
-        Item::Fn { name, body }
+        Item::Fn(Function { name, body })
     }
-}
 
-/// Statements
-impl<'src, 'a> Parser<'src, 'a, '_> {
     fn declaration(&mut self) -> Option<Stmt<'src, 'a>> {
         if let TokenTy::Typedef = self.peek() {
             self.typedef();

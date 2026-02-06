@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, AssignOp, BinaryOp, GlobalVar, UnaryOp},
+        ast::{self, AssignOp, BinaryOp, GlobalVar, Item, UnaryOp},
         error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
         ty::{ScopeStack, Ty, TyInterner},
     },
@@ -59,17 +59,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         src_path: PathBuf,
         ast_program: Program<'src, 'a>,
     ) -> Result<TypedProgram<'src, 'a>, CompileError> {
-        let functions = ast_program
-            .functions
-            .into_iter()
-            .map(|fun| self.resolve_fn(fun))
-            .collect();
+        let mut globals = Vec::new();
+        let mut functions = Vec::new();
 
-        let globals = ast_program
-            .globals
-            .into_iter()
-            .map(|global| self.resolve_global(global))
-            .collect();
+        for item in ast_program.items {
+            match item {
+                Item::Fn(fun) => functions.push(self.resolve_fn(fun)),
+                Item::Var(global) => globals.push(self.resolve_global(global)),
+            }
+        }
 
         if self.errors.is_empty() {
             Ok(TypedProgram { functions, globals })

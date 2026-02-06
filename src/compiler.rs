@@ -1,5 +1,7 @@
 use std::{
     ffi::OsString,
+    fmt::Display,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -12,7 +14,6 @@ use crate::{
     compiler::{
         error::{BuildError, CompileError},
         parser::Parser,
-        pretty::pretty_print,
         tacky::AsmConverter,
         ty::built_in_types,
         tychk::TyChecker,
@@ -25,7 +26,6 @@ mod ast;
 mod error;
 mod lexer;
 mod parser;
-mod pretty;
 mod tacky;
 mod token;
 mod ty;
@@ -222,6 +222,13 @@ fn generate_tacky<'src>(
         pretty_print(&tacky_program, "tacky", src_path);
     }
     Ok(tacky_program)
+}
+
+pub fn pretty_print(item: impl Display, name: &str, src_path: &Path) {
+    let mut buf = BufWriter::new(std::io::stderr());
+    write!(&mut buf, "{}:\n{item}", src_path.display()).unwrap_or_else(|err| {
+        eprintln!("{err}: failed to print {name} for: {}", src_path.display());
+    });
 }
 
 fn clean_up_asm_files(compile_flags: CompileFlags, asm_files: &[OsString]) {

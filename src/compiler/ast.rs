@@ -8,18 +8,16 @@ use crate::{
 pub use convert::Converter;
 
 mod convert;
+mod pretty;
 pub mod typed;
 
 pub enum Item<'src, 'a, A: Allocator = Global> {
-    Fn {
-        name: Interned<'src, str>,
-        body: Vec<Stmt<'src, 'a, A>>,
-    },
+    Fn(Function<'src, 'a, A>),
+    Var(GlobalVar<'src>),
 }
 
 pub struct Program<'src, 'a, A: Allocator = Global> {
-    pub(crate) functions: Vec<Function<'src, 'a, A>>,
-    pub(crate) globals: Vec<GlobalVar<'src>>,
+    pub(crate) items: Vec<Item<'src, 'a, A>>,
 }
 
 pub struct GlobalVar<'src> {
