@@ -1,6 +1,6 @@
 use std::{alloc::Allocator, fmt::Display};
 
-const LEVEL_SPACES: usize = 2;
+const LEVEL_SPACES: usize = 4;
 
 #[derive(Clone, Copy)]
 pub struct Level(usize);
