@@ -170,6 +170,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     err: SemanticError::DuplicateDecl,
                 });
             }
+            goto_label.declared = true;
             goto_label.label
         } else {
             let label = Label(self.label_count);
