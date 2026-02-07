@@ -157,28 +157,30 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     ///
     /// Log err if label with same id already exists
     fn make_label(&mut self, id: Identifier<'src>) -> Label {
-        self.goto_labels
-            .iter()
-            .find(|goto| goto.id.name == id.name)
-            .inspect(|goto| {
-                if goto.declared {
-                    self.errors.push(SemanticErrorWithCtx {
-                        ctx: goto.id.ctx.clone(),
-                        err: SemanticError::DuplicateDecl,
-                    });
-                }
-            })
-            .map(|goto| goto.label)
-            .unwrap_or_else(|| {
-                let label = Label(self.label_count);
-                self.label_count += 1;
-                self.goto_labels.push(GotoLabel {
-                    id,
-                    label,
-                    declared: true,
+        let label = self
+            .goto_labels
+            .iter_mut()
+            .find(|goto| goto.id.name == id.name);
+
+        if let Some(label) = label {
+            if label.declared {
+                // log_err copied to appease borrow checker
+                self.errors.push(SemanticErrorWithCtx {
+                    ctx: label.id.ctx.clone(),
+                    err: SemanticError::DuplicateDecl,
                 });
-                label
-            })
+            }
+            label.label
+        } else {
+            let label = Label(self.label_count);
+            self.label_count += 1;
+            self.goto_labels.push(GotoLabel {
+                id,
+                label,
+                declared: true,
+            });
+            label
+        }
     }
 
     fn global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
