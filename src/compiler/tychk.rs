@@ -100,6 +100,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     #[inline]
     fn reset_for_fn(&mut self) {
         self.local_count = 0;
+        self.goto_labels.clear();
     }
 
     #[inline]
