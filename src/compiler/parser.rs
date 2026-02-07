@@ -305,11 +305,22 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
     fn stmt(&mut self) -> Stmt<'src, 'a> {
         match self.peek() {
+            TokenTy::Goto => self.goto(),
             TokenTy::If => self.if_stmt(),
             TokenTy::OpenBrace => self.block(),
             TokenTy::Return => self.ret(),
+            TokenTy::Identifier => self.maybe_label(),
             _ => self.expr_stmt(),
         }
+    }
+
+    fn goto(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+        self.eat(TokenTy::Identifier, SyntaxError::InvalidLabel);
+        let name = self.intern_prev();
+        let ctx = self.prev.ctx.clone();
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+        Stmt::Goto(Identifier { name, ctx })
     }
 
     fn if_stmt(&mut self) -> Stmt<'src, 'a> {
@@ -348,6 +359,25 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
         self.types.exit_scope(old_scope_bottom);
         Stmt::Block(stmts)
+    }
+
+    fn maybe_label(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+        let name = self.intern_prev();
+        let ctx = self.prev.ctx.clone();
+
+        if self.eat_if(TokenTy::Colon) {
+            let stmt = self.stmt();
+            Stmt::Labled(Identifier { name, ctx }, self.alloc_stmt(stmt))
+        } else {
+            let primary = Expr {
+                expr: ExprTy::Var(name),
+                ctx,
+            };
+            let expr = self.anyfix_expr(primary, Precedence::None.up());
+            self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+            Stmt::Expr(self.alloc_expr(expr))
+        }
     }
 
     fn expr_stmt(&mut self) -> Stmt<'src, 'a> {

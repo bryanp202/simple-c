@@ -37,12 +37,14 @@ impl Converter {
     }
 
     pub fn convert<'src>(&mut self, program: Program<'src, '_>) -> tacky::Program<'src> {
-        let Program { globals, functions } = program;
-        let globals = globals
+        self.reset_for_program(program.labels);
+        let globals = program
+            .globals
             .into_iter()
             .map(|global| self.global(global))
             .collect();
-        let functions = functions
+        let functions = program
+            .functions
             .into_iter()
             .map(|fun| self.function(fun))
             .collect();
@@ -51,6 +53,11 @@ impl Converter {
 }
 
 impl<'src, 'a> Converter {
+    #[inline]
+    fn reset_for_program(&mut self, labels: usize) {
+        self.label_count = labels;
+    }
+
     #[inline]
     fn reset_for_fn(&mut self, local_count: usize) {
         self.temp_count = local_count;
@@ -116,6 +123,7 @@ impl<'src, 'a> Converter {
                 }
             }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
+            Stmt::Goto(label) => insts.push(tacky::Inst::Jump(label)),
             Stmt::If(condition, then_branch, else_branch) => {
                 let cond_result = self.expr(*condition, insts);
                 let else_label = self.new_label();
@@ -131,6 +139,10 @@ impl<'src, 'a> Converter {
                 } else {
                     insts.push(tacky::Inst::Label(else_label));
                 }
+            }
+            Stmt::Labled(label, stmt) => {
+                insts.push(tacky::Inst::Label(label));
+                self.stmt(*stmt, insts);
             }
             Stmt::Nil => {} // Do nothing
             Stmt::Return(expr) => {

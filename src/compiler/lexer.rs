@@ -213,6 +213,7 @@ impl Lexer<'_> {
     fn identifier(&mut self, c: char) -> TokenTy {
         match c {
             'e' => return self.check_keyword(TokenTy::Else, "lse"),
+            'g' => return self.check_keyword(TokenTy::Goto, "oto"),
             'i' => match self.peek() {
                 'f' => {
                     self.advance();

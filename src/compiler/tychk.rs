@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, AssignOp, BinaryOp, GlobalVar, Item, UnaryOp},
-        error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
+        asm::Label,
+        ast::{self, AssignOp, BinaryOp, GlobalVar, Identifier, Item, UnaryOp},
+        error::{CompileError, Context, SemanticError, SemanticErrorWithCtx, SyntaxError},
         ty::{ScopeStack, Ty, TyInterner},
     },
     intern::Interned,
@@ -24,6 +25,12 @@ type TypedStmt<'s, 'a> = ast::typed::Stmt<'s, 'a, Alloc<'a>>;
 type TypedExpr<'s, 'a> = ast::typed::Expr<'s, 'a, Alloc<'a>>;
 type TypedExprTy<'s, 'a> = ast::typed::ExprTy<'s, 'a, Alloc<'a>>;
 
+struct GotoLabel<'src> {
+    id: Identifier<'src>,
+    label: Label,
+    declared: bool,
+}
+
 struct SymbolInfo<'src, 'a> {
     ty: Interned<'a, Ty<'src, 'a>>,
     scope: ScopeTy,
@@ -39,6 +46,10 @@ pub struct TyChecker<'src, 'a> {
     ast_arena: Alloc<'a>,
     var_map: ScopeStack<Interned<'src, str>, SymbolInfo<'src, 'a>>,
     errors: Vec<SemanticErrorWithCtx>,
+    // Program data
+    label_count: usize,
+    // Function data
+    goto_labels: Vec<GotoLabel<'src>>,
     local_count: usize,
 }
 
@@ -49,6 +60,8 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             ast_arena,
             var_map: ScopeStack::new(),
             errors: Vec::new(),
+            label_count: 0,
+            goto_labels: Vec::new(),
             local_count: 0,
         }
     }
@@ -70,7 +83,11 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
 
         if self.errors.is_empty() {
-            Ok(TypedProgram { functions, globals })
+            Ok(TypedProgram {
+                labels: self.label_count,
+                functions,
+                globals,
+            })
         } else {
             Err(CompileError::from_semantic_errors(
                 src,
@@ -119,6 +136,51 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         if lhs == rhs { lhs } else { self.poisoned_ty }
     }
 
+    fn get_or_make_label(&mut self, id: Identifier<'src>) -> Label {
+        self.goto_labels
+            .iter()
+            .find(|goto| goto.id.name == id.name)
+            .map(|goto| goto.label)
+            .unwrap_or_else(|| {
+                let label = Label(self.label_count);
+                self.label_count += 1;
+                self.goto_labels.push(GotoLabel {
+                    id,
+                    label,
+                    declared: false,
+                });
+                label
+            })
+    }
+
+    /// Make a new label for goto stmts
+    ///
+    /// Log err if label with same id already exists
+    fn make_label(&mut self, id: Identifier<'src>) -> Label {
+        self.goto_labels
+            .iter()
+            .find(|goto| goto.id.name == id.name)
+            .inspect(|goto| {
+                if goto.declared {
+                    self.errors.push(SemanticErrorWithCtx {
+                        ctx: goto.id.ctx.clone(),
+                        err: SemanticError::DuplicateDecl,
+                    })
+                }
+            })
+            .map(|goto| goto.label)
+            .unwrap_or_else(|| {
+                let label = Label(self.label_count);
+                self.label_count += 1;
+                self.goto_labels.push(GotoLabel {
+                    id,
+                    label,
+                    declared: true,
+                });
+                label
+            })
+    }
+
     fn global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
         TypedGlobalVar { name: global.name }
     }
@@ -127,6 +189,18 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         self.reset_for_fn();
 
         let body = fun.body.into_iter().map(|stmt| self.stmt(stmt)).collect();
+
+        // Check all goto labels resolved
+        self.goto_labels
+            .drain(..)
+            .filter_map(|l| if l.declared { None } else { Some(l.id.ctx) })
+            .for_each(|ctx| {
+                self.errors.push(SemanticErrorWithCtx {
+                    ctx,
+                    err: SemanticError::UndeclaredVar,
+                })
+            });
+
         TypedFunction {
             name: fun.name,
             body,
@@ -160,6 +234,10 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 let init = init.map(|expr| self.expr(*expr));
                 TypedStmt::Decl(init)
             }
+            Stmt::Goto(id) => {
+                let label = self.get_or_make_label(id);
+                TypedStmt::Goto(label)
+            }
             Stmt::If(condition, then_branch, else_branch) => {
                 let condition = self.expr(*condition);
                 let then_branch = self.stmt(*then_branch);
@@ -167,6 +245,11 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     .map(|stmt| self.stmt(*stmt))
                     .map(|stmt| self.alloc_stmt(stmt));
                 TypedStmt::If(condition, self.alloc_stmt(then_branch), else_branch)
+            }
+            Stmt::Labled(id, stmt) => {
+                let label = self.make_label(id);
+                let stmt = self.stmt(*stmt);
+                TypedStmt::Labled(label, self.alloc_stmt(stmt))
             }
             Stmt::Nil => TypedStmt::Nil,
             Stmt::Return(expr) => TypedStmt::Return(self.expr(*expr)),

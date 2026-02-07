@@ -2,6 +2,7 @@ use std::alloc::{Allocator, Global};
 
 use crate::{
     compiler::{
+        asm::Label,
         ast::{AssignOp, BinaryOp, UnaryOp},
         ty::Ty,
     },
@@ -9,6 +10,7 @@ use crate::{
 };
 
 pub struct Program<'src, 'a, A: Allocator = Global> {
+    pub(crate) labels: usize,
     pub(crate) functions: Vec<Function<'src, 'a, A>>,
     pub(crate) globals: Vec<GlobalVar<'src>>,
 }
@@ -27,11 +29,13 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Block(Vec<Stmt<'src, 'a, A>>),
     Decl(Option<Box<Expr<'src, 'a, A>, A>>),
     Expr(Box<Expr<'src, 'a, A>, A>),
+    Goto(Label),
     If(
         Box<Expr<'src, 'a, A>, A>,
         Box<Stmt<'src, 'a, A>, A>,
         Option<Box<Stmt<'src, 'a, A>, A>>,
     ),
+    Labled(Label, Box<Stmt<'src, 'a, A>, A>),
     Nil,
     Return(Box<Expr<'src, 'a, A>, A>),
 }

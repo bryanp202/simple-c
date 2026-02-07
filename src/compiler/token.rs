@@ -8,6 +8,7 @@ pub enum TokenTy {
     Identifier,
     // Keywords
     Else,
+    Goto,
     If,
     Int,
     Return,

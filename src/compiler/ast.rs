@@ -42,11 +42,13 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
         Option<Box<Expr<'src, A>, A>>,
     ),
     Expr(Box<Expr<'src, A>, A>),
+    Goto(Identifier<'src>),
     If(
         Box<Expr<'src, A>, A>,
         Box<Stmt<'src, 'a, A>, A>,
         Option<Box<Stmt<'src, 'a, A>, A>>,
     ),
+    Labled(Identifier<'src>, Box<Stmt<'src, 'a, A>, A>),
     Nil,
     Return(Box<Expr<'src, A>, A>),
 }

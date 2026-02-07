@@ -14,6 +14,10 @@ impl Level {
         Self(self.0 + 1)
     }
 
+    pub fn prev(self) -> Self {
+        Self(self.0.saturating_sub(1))
+    }
+
     pub fn to_spaces(self) -> usize {
         self.0 * LEVEL_SPACES
     }
@@ -57,8 +61,13 @@ impl<A: Allocator> Display for super::Function<'_, '_, A> {
 
 impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, level: Level) -> std::fmt::Result {
-        let spaces = level.to_spaces();
+        let spaces = if matches!(self, super::Stmt::Labled(..)) {
+            level.prev().to_spaces()
+        } else {
+            level.to_spaces()
+        };
         write!(f, "{: >spaces$}", "")?;
+        
         match self {
             Self::Block(stmts) => stmts.pretty(f, level),
             Self::Decl(id, ty, init) => {
@@ -70,6 +79,7 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                 }
             }
             Self::Expr(expr) => write!(f, "{expr};"),
+            Self::Goto(id) => write!(f, "goto {};", id.name.get()),
             Self::If(condition, then_branch, else_branch) => {
                 writeln!(f, "if ({})", condition)?;
                 let then_level = if matches!(then_branch.as_ref(), &Self::Block(_)) {
@@ -90,6 +100,10 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                 } else {
                     Ok(())
                 }
+            }
+            Self::Labled(id, stmt) => {
+                writeln!(f, "{}:", id.name.get())?;
+                stmt.pretty(f, level)
             }
             Self::Nil => write!(f, ";"),
             Self::Return(expr) => write!(f, "return {expr};"),
