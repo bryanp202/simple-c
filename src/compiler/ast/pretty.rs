@@ -67,7 +67,7 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
             level.to_spaces()
         };
         write!(f, "{: >spaces$}", "")?;
-        
+
         match self {
             Self::Block(stmts) => stmts.pretty(f, level),
             Self::Decl(id, ty, init) => {

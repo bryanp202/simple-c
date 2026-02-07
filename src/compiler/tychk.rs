@@ -5,7 +5,7 @@ use crate::{
     compiler::{
         asm::Label,
         ast::{self, AssignOp, BinaryOp, GlobalVar, Identifier, Item, UnaryOp},
-        error::{CompileError, Context, SemanticError, SemanticErrorWithCtx, SyntaxError},
+        error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
         ty::{ScopeStack, Ty, TyInterner},
     },
     intern::Interned,
@@ -100,7 +100,6 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     #[inline]
     fn reset_for_fn(&mut self) {
         self.local_count = 0;
-        self.goto_labels.clear();
     }
 
     #[inline]
@@ -166,7 +165,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                     self.errors.push(SemanticErrorWithCtx {
                         ctx: goto.id.ctx.clone(),
                         err: SemanticError::DuplicateDecl,
-                    })
+                    });
                 }
             })
             .map(|goto| goto.label)
@@ -199,7 +198,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 self.errors.push(SemanticErrorWithCtx {
                     ctx,
                     err: SemanticError::UndeclaredVar,
-                })
+                });
             });
 
         TypedFunction {
