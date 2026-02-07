@@ -162,15 +162,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             .iter_mut()
             .find(|goto| goto.id.name == id.name);
 
-        if let Some(label) = label {
-            if label.declared {
+        if let Some(goto_label) = label {
+            if goto_label.declared {
                 // log_err copied to appease borrow checker
                 self.errors.push(SemanticErrorWithCtx {
-                    ctx: label.id.ctx.clone(),
+                    ctx: goto_label.id.ctx.clone(),
                     err: SemanticError::DuplicateDecl,
                 });
             }
-            label.label
+            goto_label.label
         } else {
             let label = Label(self.label_count);
             self.label_count += 1;
