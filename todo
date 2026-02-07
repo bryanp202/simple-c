@@ -16,3 +16,5 @@ Stmt and ExprTy and Inst? should hold structs that each implement some trait (Ty
 - These trait fn would take in a Fixer or Converter, or TyChecker helper
 Pretty print should would like Register Display
 Make ast pretty print better: potentially switch to printing explicit src program?
+
+Should goto label resolution be able to do errors on all uses of undeclared label use, or just the first one?

@@ -166,7 +166,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             if goto_label.declared {
                 // log_err copied to appease borrow checker
                 self.errors.push(SemanticErrorWithCtx {
-                    ctx: goto_label.id.ctx.clone(),
+                    ctx: id.ctx.clone(),
                     err: SemanticError::DuplicateDecl,
                 });
             }
