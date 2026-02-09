@@ -32,6 +32,18 @@ pub struct ForStmt<'src, 'a, A: Allocator> {
     pub(crate) body: Box<Stmt<'src, 'a, A>, A>,
 }
 
+pub struct SwitchStmt<'src, 'a, A: Allocator> {
+    pub(crate) expr: Box<Expr<'src, 'a, A>, A>,
+    pub(crate) cases: Vec<SwitchCase>,
+    pub(crate) default: Option<Label>,
+    pub(crate) body: Box<Stmt<'src, 'a, A>, A>,
+}
+
+pub struct SwitchCase {
+    pub(crate) val: i32,
+    pub(crate) label: Label,
+}
+
 pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Break,
     Block(Vec<Stmt<'src, 'a, A>>),
@@ -49,6 +61,7 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Labled(Label, Box<Stmt<'src, 'a, A>, A>),
     Nil,
     Return(Box<Expr<'src, 'a, A>, A>),
+    Switch(Box<SwitchStmt<'src, 'a, A>, A>),
     While(Box<Expr<'src, 'a, A>, A>, Box<Stmt<'src, 'a, A>, A>),
 }
 

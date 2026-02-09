@@ -89,6 +89,20 @@ impl<'src, 'a> Converter {
         Label(label)
     }
 
+    /// Creates a new break label, returns the old one for restoring at end of loop/switch
+    #[inline]
+    fn new_break_label(&mut self) -> Label {
+        let break_label = self.new_label();
+        std::mem::replace(&mut self.break_label, break_label)
+    }
+
+    /// Creates a new break label, returns the old one for restoring at end of loop
+    #[inline]
+    fn new_continue_label(&mut self) -> Label {
+        let continue_label = self.new_label();
+        std::mem::replace(&mut self.continue_label, continue_label)
+    }
+
     fn global(&self, global: GlobalVar<'src>) -> tacky::GlobalVar<'src> {
         let GlobalVar { name } = global;
         tacky::GlobalVar { name }
@@ -129,10 +143,8 @@ impl<'src, 'a> Converter {
                 }
             }
             Stmt::Do(body, condition) => {
-                let break_label = self.new_label();
-                let continue_label = self.new_label();
-                let old_break = std::mem::replace(&mut self.break_label, break_label);
-                let old_continue = std::mem::replace(&mut self.continue_label, continue_label);
+                let old_break = self.new_break_label();
+                let old_continue = self.new_continue_label();
 
                 let start_label = self.new_label();
                 insts.push(tacky::Inst::Label(start_label));
@@ -147,10 +159,8 @@ impl<'src, 'a> Converter {
             }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
             Stmt::For(for_stmt) => {
-                let break_label = self.new_label();
-                let continue_label = self.new_label();
-                let old_break = std::mem::replace(&mut self.break_label, break_label);
-                let old_continue = std::mem::replace(&mut self.continue_label, continue_label);
+                let old_break = self.new_break_label();
+                let old_continue = self.new_continue_label();
 
                 if let Some(init) = for_stmt.init {
                     self.stmt(*init, insts);
@@ -201,6 +211,31 @@ impl<'src, 'a> Converter {
             Stmt::Return(expr) => {
                 let src = self.expr(*expr, insts);
                 insts.push(tacky::Inst::Ret(src));
+            }
+            Stmt::Switch(switch_stmt) => {
+                let old_break = self.new_break_label();
+
+                let lhs = self.expr(*switch_stmt.expr, insts);
+
+                let op = tacky::BinaryOp::E;
+                for case in switch_stmt.cases {
+                    let dst = self.new_local();
+                    insts.push(tacky::Inst::Binary {
+                        op,
+                        lhs,
+                        rhs: tacky::Val::Const(case.val),
+                        dst,
+                    });
+                    insts.push(tacky::Inst::JumpIfNotZero(dst, case.label));
+                }
+
+                if let Some(label) = switch_stmt.default {
+                    insts.push(tacky::Inst::Jump(label));
+                }
+
+                self.stmt(*switch_stmt.body, insts);
+
+                self.break_label = old_break;
             }
             Stmt::While(condition, body) => {
                 let break_label = self.new_label();

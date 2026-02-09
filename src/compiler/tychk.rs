@@ -4,7 +4,10 @@ use crate::{
     arena::Arena,
     compiler::{
         asm::Label,
-        ast::{self, AssignOp, BinaryOp, GlobalVar, Identifier, Item, UnaryOp, typed::ForStmt},
+        ast::{
+            self, AssignOp, BinaryOp, GlobalVar, Identifier, Item, UnaryOp,
+            typed::{ForStmt, SwitchCase, SwitchStmt},
+        },
         error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
         ty::{ScopeStack, Ty, TyInterner},
     },
@@ -24,6 +27,8 @@ type TypedFunction<'s, 'a> = ast::typed::Function<'s, 'a, Alloc<'a>>;
 type TypedStmt<'s, 'a> = ast::typed::Stmt<'s, 'a, Alloc<'a>>;
 type TypedExpr<'s, 'a> = ast::typed::Expr<'s, 'a, Alloc<'a>>;
 type TypedExprTy<'s, 'a> = ast::typed::ExprTy<'s, 'a, Alloc<'a>>;
+
+type SwitchData<'s, 'a> = (Vec<SwitchCase>, Option<Label>);
 
 struct GotoLabel<'src> {
     id: Identifier<'src>,
@@ -52,6 +57,7 @@ pub struct TyChecker<'src, 'a> {
     goto_labels: Vec<GotoLabel<'src>>,
     local_count: usize,
     loop_depth: usize,
+    switch_cases: Option<SwitchData<'src, 'a>>,
 }
 
 impl<'src, 'a> TyChecker<'src, 'a> {
@@ -65,6 +71,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             goto_labels: Vec::new(),
             local_count: 0,
             loop_depth: 0,
+            switch_cases: None,
         }
     }
 
@@ -140,6 +147,31 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         self.loop_depth -= 1;
     }
 
+    #[inline]
+    fn enter_switch(&mut self) -> Option<SwitchData<'src, 'a>> {
+        let old = std::mem::replace(&mut self.switch_cases, Some((Vec::new(), None)));
+        old
+    }
+
+    #[inline]
+    fn exit_switch(
+        &mut self,
+        old_switch_data: Option<SwitchData<'src, 'a>>,
+    ) -> SwitchData<'src, 'a> {
+        let old = std::mem::replace(&mut self.switch_cases, old_switch_data);
+        old.expect("exit_switch must be called after enter_switch")
+    }
+
+    #[inline]
+    fn can_break(&self) -> bool {
+        self.loop_depth > 0 || self.switch_cases.is_some()
+    }
+
+    #[inline]
+    fn can_continue(&mut self) -> bool {
+        self.loop_depth > 0
+    }
+
     fn common_type(
         &self,
         lhs: Interned<'a, Ty<'src, 'a>>,
@@ -148,14 +180,19 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         if lhs == rhs { lhs } else { self.poisoned_ty }
     }
 
-    fn get_or_make_label(&mut self, id: Identifier<'src>) -> Label {
+    fn new_label(&mut self) -> Label {
+        let label = Label(self.label_count);
+        self.label_count += 1;
+        label
+    }
+
+    fn get_or_make_goto_label(&mut self, id: Identifier<'src>) -> Label {
         self.goto_labels
             .iter()
             .find(|goto| goto.id.name == id.name)
             .map(|goto| goto.label)
             .unwrap_or_else(|| {
-                let label = Label(self.label_count);
-                self.label_count += 1;
+                let label = self.new_label();
                 self.goto_labels.push(GotoLabel {
                     id,
                     label,
@@ -168,7 +205,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     /// Make a new label for goto stmts
     ///
     /// Log err if label with same id already exists
-    fn make_label(&mut self, id: Identifier<'src>) -> Label {
+    fn make_goto_label(&mut self, id: Identifier<'src>) -> Label {
         let label = self
             .goto_labels
             .iter_mut()
@@ -185,8 +222,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             goto_label.declared = true;
             goto_label.label
         } else {
-            let label = Label(self.label_count);
-            self.label_count += 1;
+            let label = self.new_label();
             self.goto_labels.push(GotoLabel {
                 id,
                 label,
@@ -232,13 +268,15 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 TypedStmt::Block(stmts)
             }
             Stmt::Break(ctx) => {
-                if self.loop_depth == 0 {
+                if !self.can_break() {
                     self.log_err(ctx, SemanticError::InvalidBreak);
                 }
                 TypedStmt::Break
             }
+            Stmt::Case(ctx, Some(expr), body) => self.switch_case(ctx, *expr, *body),
+            Stmt::Case(ctx, None, body) => self.switch_default(ctx, *body),
             Stmt::Continue(ctx) => {
-                if self.loop_depth == 0 {
+                if !self.can_continue() {
                     self.log_err(ctx, SemanticError::InvalidContinue);
                 }
                 TypedStmt::Continue
@@ -292,7 +330,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 TypedStmt::For(Box::new_in(for_stmt, self.ast_arena))
             }
             Stmt::Goto(id) => {
-                let label = self.get_or_make_label(id);
+                let label = self.get_or_make_goto_label(id);
                 TypedStmt::Goto(label)
             }
             Stmt::If(condition, then_branch, else_branch) => {
@@ -304,12 +342,13 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 TypedStmt::If(condition, self.alloc_stmt(then_branch), else_branch)
             }
             Stmt::Labled(id, stmt) => {
-                let label = self.make_label(id);
+                let label = self.make_goto_label(id);
                 let stmt = self.stmt(*stmt);
                 TypedStmt::Labled(label, self.alloc_stmt(stmt))
             }
             Stmt::Nil => TypedStmt::Nil,
             Stmt::Return(expr) => TypedStmt::Return(self.expr(*expr)),
+            Stmt::Switch(expr, body) => self.switch_stmt(*expr, *body),
             Stmt::While(condition, body) => {
                 self.enter_loop();
                 let condition = self.expr(*condition);
@@ -318,6 +357,71 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 TypedStmt::While(condition, self.alloc_stmt(body))
             }
         }
+    }
+
+    fn switch_stmt(&mut self, expr: Expr<'src, 'a>, body: Stmt<'src, 'a>) -> TypedStmt<'src, 'a> {
+        let old_switch_data = self.enter_switch();
+        let expr = self.expr(expr);
+
+        let body = self.stmt(body);
+
+        let (cases, default) = self.exit_switch(old_switch_data);
+        let switch_stmt = SwitchStmt {
+            expr,
+            cases,
+            default,
+            body: self.alloc_stmt(body),
+        };
+        TypedStmt::Switch(Box::new_in(switch_stmt, self.ast_arena))
+    }
+
+    fn switch_case(
+        &mut self,
+        ctx: Context,
+        expr: Expr<'src, 'a>,
+        body: Stmt<'src, 'a>,
+    ) -> TypedStmt<'src, 'a> {
+        let label = self.new_label();
+
+        if let Some(switch_cases) = &mut self.switch_cases {
+            let ctx = expr.ctx.clone();
+            if let ExprTy::Constant(imm) = expr.expr {
+                let duplicate = switch_cases
+                    .0
+                    .iter()
+                    .map(|case| case.val)
+                    .any(|val| val == imm);
+                if duplicate {
+                    self.log_err(ctx, SemanticError::DuplicateCase);
+                } else {
+                    switch_cases.0.push(SwitchCase { val: imm, label });
+                }
+            } else {
+                self.log_err(ctx, SemanticError::InvalidCaseExpr);
+            };
+        } else {
+            self.log_err(ctx, SemanticError::InvalidCase);
+        }
+
+        let stmt = self.stmt(body);
+        TypedStmt::Labled(label, self.alloc_stmt(stmt))
+    }
+
+    fn switch_default(&mut self, ctx: Context, body: Stmt<'src, 'a>) -> TypedStmt<'src, 'a> {
+        let label = self.new_label();
+
+        if let Some(switch_cases) = &mut self.switch_cases {
+            if let None = switch_cases.1 {
+                switch_cases.1 = Some(label);
+            } else {
+                self.log_err(ctx, SemanticError::MultipleDefaultCases);
+            }
+        } else {
+            self.log_err(ctx, SemanticError::InvalidCase);
+        }
+
+        let stmt = self.stmt(body);
+        TypedStmt::Labled(label, self.alloc_stmt(stmt))
     }
 
     fn expr(&mut self, Expr { expr, ctx }: Expr<'src, 'a>) -> Box<TypedExpr<'src, 'a>, Alloc<'a>> {

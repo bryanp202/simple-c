@@ -44,6 +44,11 @@ pub struct ForStmt<'src, 'a, A: Allocator> {
 pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Block(Vec<Stmt<'src, 'a, A>>),
     Break(Context),
+    Case(
+        Context,
+        Option<Box<Expr<'src, A>, A>>,
+        Box<Stmt<'src, 'a, A>, A>,
+    ),
     Continue(Context),
     Decl(
         Identifier<'src>,
@@ -62,6 +67,7 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Labled(Identifier<'src>, Box<Stmt<'src, 'a, A>, A>),
     Nil,
     Return(Box<Expr<'src, A>, A>),
+    Switch(Box<Expr<'src, A>, A>, Box<Stmt<'src, 'a, A>, A>),
     While(Box<Expr<'src, A>, A>, Box<Stmt<'src, 'a, A>, A>),
 }
 

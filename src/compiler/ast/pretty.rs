@@ -61,7 +61,7 @@ impl<A: Allocator> Display for super::Function<'_, '_, A> {
 
 #[inline]
 fn sub_stmt_level<A: Allocator>(stmt: &super::Stmt<'_, '_, A>, level: Level) -> Level {
-    if matches!(stmt, &super::Stmt::Block(_)) {
+    if matches!(stmt, &super::Stmt::Block(_) | &super::Stmt::Case(..) | &super::Stmt::Labled(..)) {
         level
     } else {
         level.next()
@@ -80,6 +80,14 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
         match self {
             Self::Block(stmts) => stmts.pretty(f, level),
             Self::Break(_) => write!(f, "break;"),
+            Self::Case(_, expr, stmt) => {
+                if let Some(expr) = expr {
+                    writeln!(f, "case {expr}:")?;
+                } else {
+                    writeln!(f, "default:")?;
+                }
+                stmt.pretty(f, sub_stmt_level(stmt, level))
+            }
             Self::Continue(_) => write!(f, "continue;"),
             Self::Decl(id, ty, init) => {
                 write!(f, "{} {}", ty.get(), id.name.get())?;
@@ -138,6 +146,10 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
             }
             Self::Nil => write!(f, ";"),
             Self::Return(expr) => write!(f, "return {expr};"),
+            Self::Switch(expr, body) => {
+                writeln!(f, "switch ({expr})")?;
+                body.pretty(f, sub_stmt_level(body, level))
+            }
             Self::While(condition, body) => {
                 writeln!(f, "while ({condition})")?;
                 body.pretty(f, sub_stmt_level(body, level))

@@ -198,20 +198,28 @@ impl Display for SyntaxError {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SemanticError {
+    DuplicateCase,
     DuplicateDecl,
     InvalidBreak,
+    InvalidCase,
+    InvalidCaseExpr,
     InvalidContinue,
     InvalidLValue,
+    MultipleDefaultCases,
     UndeclaredVar,
 }
 
 impl Display for SemanticError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
+            Self::DuplicateCase => "duplicate switch cases",
             Self::DuplicateDecl => "duplicate declaration",
             Self::InvalidBreak => "break must be in loop or switch",
+            Self::InvalidCase => "case and default must be defined in a switch",
+            Self::InvalidCaseExpr => "case expression must be an int literal",
             Self::InvalidContinue => "continue must be in loop",
             Self::InvalidLValue => "invalid lvalue",
+            Self::MultipleDefaultCases => "multiple default cases defined",
             Self::UndeclaredVar => "use of undeclared variable",
         };
         let error_code = *self as usize;

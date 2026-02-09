@@ -306,7 +306,9 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     fn stmt(&mut self) -> Stmt<'src, 'a> {
         match self.peek() {
             TokenTy::Break => self.break_stmt(),
+            TokenTy::Case => self.case(),
             TokenTy::Continue => self.continue_stmt(),
+            TokenTy::Default => self.default_case(),
             TokenTy::Do => self.do_stmt(),
             TokenTy::For => self.for_stmt(),
             TokenTy::Goto => self.goto(),
@@ -314,9 +316,27 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             TokenTy::OpenBrace => self.block(),
             TokenTy::Return => self.ret(),
             TokenTy::While => self.while_stmt(),
+            TokenTy::Switch => self.switch(),
             TokenTy::Identifier => self.maybe_label(),
             _ => self.expr_stmt(),
         }
+    }
+
+    fn block(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        let old_scope_bottom = self.types.enter_scope();
+        let mut stmts = Vec::new();
+
+        while !self.at_end() && !self.check(TokenTy::CloseBrace) {
+            if let Some(stmt) = self.declaration() {
+                stmts.push(stmt);
+            }
+        }
+        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter);
+
+        self.types.exit_scope(old_scope_bottom);
+        Stmt::Block(stmts)
     }
 
     fn break_stmt(&mut self) -> Stmt<'src, 'a> {
@@ -328,6 +348,20 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         Stmt::Break(ctx)
     }
 
+    fn case(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+        let ctx = self.prev.ctx.clone();
+
+        let expr = {
+            let expr = self.expr();
+            Some(self.alloc_expr(expr))
+        };
+        self.eat_no_sync(TokenTy::Colon, SyntaxError::ExpectedColon);
+        let stmt = self.stmt();
+
+        Stmt::Case(ctx, expr, self.alloc_stmt(stmt))
+    }
+
     fn continue_stmt(&mut self) -> Stmt<'src, 'a> {
         self.advance_unchecked();
 
@@ -335,6 +369,16 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
 
         Stmt::Continue(ctx)
+    }
+
+    fn default_case(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        let ctx = self.prev.ctx.clone();
+        self.eat_no_sync(TokenTy::Colon, SyntaxError::ExpectedColon);
+        let stmt = self.stmt();
+
+        Stmt::Case(ctx, None, self.alloc_stmt(stmt))
     }
 
     fn do_stmt(&mut self) -> Stmt<'src, 'a> {
@@ -411,23 +455,6 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         )
     }
 
-    fn block(&mut self) -> Stmt<'src, 'a> {
-        self.advance_unchecked();
-
-        let old_scope_bottom = self.types.enter_scope();
-        let mut stmts = Vec::new();
-
-        while !self.at_end() && !self.check(TokenTy::CloseBrace) {
-            if let Some(stmt) = self.declaration() {
-                stmts.push(stmt);
-            }
-        }
-        self.eat(TokenTy::CloseBrace, SyntaxError::UnclosedDelimiter);
-
-        self.types.exit_scope(old_scope_bottom);
-        Stmt::Block(stmts)
-    }
-
     fn maybe_label(&mut self) -> Stmt<'src, 'a> {
         self.advance_unchecked();
         let name = self.intern_prev();
@@ -471,6 +498,17 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let body = self.stmt();
 
         Stmt::While(self.alloc_expr(condition), self.alloc_stmt(body))
+    }
+
+    fn switch(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        self.eat_no_sync(TokenTy::OpenParen, SyntaxError::ExpectedOpenParen);
+        let expr = self.expr();
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
+        let body = self.stmt();
+
+        Stmt::Switch(self.alloc_expr(expr), self.alloc_stmt(body))
     }
 
     fn poison_expr(&mut self, err: SyntaxError) -> Expr<'src, 'a> {
