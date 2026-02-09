@@ -19,6 +19,8 @@ pub struct Converter {
     temp_count: usize,
     label_count: usize,
     curr_local: usize,
+    break_label: Label,
+    continue_label: Label,
 }
 
 impl Default for Converter {
@@ -33,6 +35,8 @@ impl Converter {
             temp_count: 0,
             label_count: 0,
             curr_local: 0,
+            break_label: Label(usize::MAX),
+            continue_label: Label(usize::MAX),
         }
     }
 
@@ -115,6 +119,8 @@ impl<'src, 'a> Converter {
                     self.stmt(stmt, insts);
                 }
             }
+            Stmt::Break => insts.push(tacky::Inst::Jump(self.break_label)),
+            Stmt::Continue => insts.push(tacky::Inst::Jump(self.continue_label)),
             Stmt::Decl(init) => {
                 let local = self.new_local();
                 if let Some(init) = init {
@@ -122,7 +128,54 @@ impl<'src, 'a> Converter {
                     insts.push(tacky::Inst::Copy { src, dst: local });
                 }
             }
+            Stmt::Do(body, condition) => {
+                let break_label = self.new_label();
+                let continue_label = self.new_label();
+                let old_break = std::mem::replace(&mut self.break_label, break_label);
+                let old_continue = std::mem::replace(&mut self.continue_label, continue_label);
+
+                let start_label = self.new_label();
+                insts.push(tacky::Inst::Label(start_label));
+                self.stmt(*body, insts);
+                insts.push(tacky::Inst::Label(self.continue_label));
+                let cond = self.expr(*condition, insts);
+                insts.push(tacky::Inst::JumpIfNotZero(cond, start_label));
+                insts.push(tacky::Inst::Label(self.break_label));
+
+                self.break_label = old_break;
+                self.continue_label = old_continue;
+            }
             Stmt::Expr(expr) => _ = self.expr(*expr, insts),
+            Stmt::For(for_stmt) => {
+                let break_label = self.new_label();
+                let continue_label = self.new_label();
+                let old_break = std::mem::replace(&mut self.break_label, break_label);
+                let old_continue = std::mem::replace(&mut self.continue_label, continue_label);
+
+                if let Some(init) = for_stmt.init {
+                    self.stmt(*init, insts);
+                }
+
+                let start_label = self.new_label();
+                insts.push(tacky::Inst::Label(start_label));
+                if let Some(condition) = for_stmt.condition {
+                    let cond = self.expr(*condition, insts);
+                    insts.push(tacky::Inst::JumpIfZero(cond, self.break_label));
+                }
+
+                self.stmt(*for_stmt.body, insts);
+
+                insts.push(tacky::Inst::Label(self.continue_label));
+                if let Some(increment) = for_stmt.increment {
+                    _ = self.expr(*increment, insts);
+                }
+
+                insts.push(tacky::Inst::Jump(start_label));
+                insts.push(tacky::Inst::Label(self.break_label));
+
+                self.break_label = old_break;
+                self.continue_label = old_continue;
+            }
             Stmt::Goto(label) => insts.push(tacky::Inst::Jump(label)),
             Stmt::If(condition, then_branch, else_branch) => {
                 let cond_result = self.expr(*condition, insts);
@@ -148,6 +201,23 @@ impl<'src, 'a> Converter {
             Stmt::Return(expr) => {
                 let src = self.expr(*expr, insts);
                 insts.push(tacky::Inst::Ret(src));
+            }
+            Stmt::While(condition, body) => {
+                let break_label = self.new_label();
+                let continue_label = self.new_label();
+                let old_break = std::mem::replace(&mut self.break_label, break_label);
+                let old_continue = std::mem::replace(&mut self.continue_label, continue_label);
+
+                insts.push(tacky::Inst::Label(self.continue_label));
+                let cond = self.expr(*condition, insts);
+                insts.push(tacky::Inst::JumpIfZero(cond, self.break_label));
+
+                self.stmt(*body, insts);
+                insts.push(tacky::Inst::Jump(self.continue_label));
+                insts.push(tacky::Inst::Label(self.break_label));
+
+                self.break_label = old_break;
+                self.continue_label = old_continue;
             }
         }
     }

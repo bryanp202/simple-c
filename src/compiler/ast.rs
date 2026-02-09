@@ -34,14 +34,25 @@ pub struct Identifier<'src> {
     pub(crate) ctx: Context,
 }
 
+pub struct ForStmt<'src, 'a, A: Allocator> {
+    pub(crate) init: Option<Box<Stmt<'src, 'a, A>, A>>,
+    pub(crate) condition: Option<Box<Expr<'src, A>, A>>,
+    pub(crate) increment: Option<Box<Expr<'src, A>, A>>,
+    pub(crate) body: Box<Stmt<'src, 'a, A>, A>,
+}
+
 pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Block(Vec<Stmt<'src, 'a, A>>),
+    Break(Context),
+    Continue(Context),
     Decl(
         Identifier<'src>,
         Interned<'a, Ty<'src, 'a>>,
         Option<Box<Expr<'src, A>, A>>,
     ),
+    Do(Box<Stmt<'src, 'a, A>, A>, Box<Expr<'src, A>, A>),
     Expr(Box<Expr<'src, A>, A>),
+    For(Box<ForStmt<'src, 'a, A>, A>),
     Goto(Identifier<'src>),
     If(
         Box<Expr<'src, A>, A>,
@@ -51,6 +62,7 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Labled(Identifier<'src>, Box<Stmt<'src, 'a, A>, A>),
     Nil,
     Return(Box<Expr<'src, A>, A>),
+    While(Box<Expr<'src, A>, A>, Box<Stmt<'src, 'a, A>, A>),
 }
 
 pub struct Expr<'src, A: Allocator> {

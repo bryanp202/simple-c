@@ -59,6 +59,15 @@ impl<A: Allocator> Display for super::Function<'_, '_, A> {
     }
 }
 
+#[inline]
+fn sub_stmt_level<A: Allocator>(stmt: &super::Stmt<'_, '_, A>, level: Level) -> Level {
+    if matches!(stmt, &super::Stmt::Block(_)) {
+        level
+    } else {
+        level.next()
+    }
+}
+
 impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, level: Level) -> std::fmt::Result {
         let spaces = if matches!(self, super::Stmt::Labled(..)) {
@@ -70,6 +79,8 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
 
         match self {
             Self::Block(stmts) => stmts.pretty(f, level),
+            Self::Break(_) => write!(f, "break;"),
+            Self::Continue(_) => write!(f, "continue;"),
             Self::Decl(id, ty, init) => {
                 write!(f, "{} {}", ty.get(), id.name.get())?;
                 if let Some(init) = init {
@@ -78,18 +89,38 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                     write!(f, ";")
                 }
             }
+            Self::Do(body, condition) => {
+                writeln!(f, "do")?;
+                body.pretty(f, sub_stmt_level(body, level))?;
+                writeln!(f)?;
+                write!(f, "{: >spaces$}while ({condition});", "")
+            }
             Self::Expr(expr) => write!(f, "{expr};"),
+            Self::For(for_stmt) => {
+                write!(f, "for (")?;
+                for_stmt
+                    .init
+                    .as_ref()
+                    .map_or(&super::Stmt::Nil, |stmt| stmt.as_ref())
+                    .pretty(f, Level::new())?;
+                if let Some(condition) = &for_stmt.condition {
+                    write!(f, " {condition}")?;
+                }
+                write!(f, "; ")?;
+                if let Some(increment) = &for_stmt.increment {
+                    write!(f, "{increment}")?;
+                }
+                writeln!(f, ")")?;
+                for_stmt
+                    .body
+                    .pretty(f, sub_stmt_level(&for_stmt.body, level))
+            }
             Self::Goto(id) => write!(f, "goto {};", id.name.get()),
             Self::If(condition, then_branch, else_branch) => {
                 writeln!(f, "if ({})", condition)?;
-                let then_level = if matches!(then_branch.as_ref(), &Self::Block(_)) {
-                    level
-                } else {
-                    level.next()
-                };
-                then_branch.pretty(f, then_level)?;
-                writeln!(f)?;
+                then_branch.pretty(f, sub_stmt_level(then_branch, level))?;
                 if let Some(else_branch) = else_branch {
+                    writeln!(f)?;
                     writeln!(f, "{: >spaces$}else", "")?;
                     let else_level = if matches!(else_branch.as_ref(), &Self::Block(_)) {
                         level
@@ -107,6 +138,10 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
             }
             Self::Nil => write!(f, ";"),
             Self::Return(expr) => write!(f, "return {expr};"),
+            Self::While(condition, body) => {
+                writeln!(f, "while ({condition})")?;
+                body.pretty(f, sub_stmt_level(body, level))
+            }
         }
     }
 }

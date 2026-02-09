@@ -164,6 +164,7 @@ pub enum SyntaxError {
     ExpectedIdentifier,
     ExpectedOpenParen,
     ExpectedSemicolon,
+    ExpectedWhile,
     IntegerLiteralTooLarge,
     InvalidLabel,
     InvalidExpr,
@@ -181,6 +182,7 @@ impl Display for SyntaxError {
             Self::ExpectedIdentifier => "expected an identifier",
             Self::ExpectedOpenParen => "expected a '('",
             Self::ExpectedSemicolon => "expected a ';'",
+            Self::ExpectedWhile => "expected 'while' after do loop body",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidLabel => "invalid label",
             Self::InvalidExpr => "invalid expression",
@@ -197,6 +199,8 @@ impl Display for SyntaxError {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SemanticError {
     DuplicateDecl,
+    InvalidBreak,
+    InvalidContinue,
     InvalidLValue,
     UndeclaredVar,
 }
@@ -205,6 +209,8 @@ impl Display for SemanticError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::DuplicateDecl => "duplicate declaration",
+            Self::InvalidBreak => "break must be in loop or switch",
+            Self::InvalidContinue => "continue must be in loop",
             Self::InvalidLValue => "invalid lvalue",
             Self::UndeclaredVar => "use of undeclared variable",
         };

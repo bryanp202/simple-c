@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     arena::Arena,
     compiler::{
-        ast::{self, AssignOp, BinaryOp, Function, Identifier, UnaryOp},
+        ast::{self, AssignOp, BinaryOp, ForStmt, Function, Identifier, UnaryOp},
         error::{CompileError, Context, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
         token::{Precedence, Token, TokenTy},
@@ -305,13 +305,80 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
     fn stmt(&mut self) -> Stmt<'src, 'a> {
         match self.peek() {
+            TokenTy::Break => self.break_stmt(),
+            TokenTy::Continue => self.continue_stmt(),
+            TokenTy::Do => self.do_stmt(),
+            TokenTy::For => self.for_stmt(),
             TokenTy::Goto => self.goto(),
             TokenTy::If => self.if_stmt(),
             TokenTy::OpenBrace => self.block(),
             TokenTy::Return => self.ret(),
+            TokenTy::While => self.while_stmt(),
             TokenTy::Identifier => self.maybe_label(),
             _ => self.expr_stmt(),
         }
+    }
+
+    fn break_stmt(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        let ctx = self.prev.ctx.clone();
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+
+        Stmt::Break(ctx)
+    }
+
+    fn continue_stmt(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        let ctx = self.prev.ctx.clone();
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+
+        Stmt::Continue(ctx)
+    }
+
+    fn do_stmt(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        let body = self.stmt();
+        self.eat(TokenTy::While, SyntaxError::ExpectedWhile);
+        self.eat_no_sync(TokenTy::OpenParen, SyntaxError::ExpectedOpenParen);
+        let condition = self.expr();
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+
+        Stmt::Do(self.alloc_stmt(body), self.alloc_expr(condition))
+    }
+
+    fn for_stmt(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        self.eat_no_sync(TokenTy::OpenParen, SyntaxError::ExpectedOpenParen);
+
+        let init = if self.next_is_type() {
+            let decl = self.var_declaration();
+            Some(self.alloc_stmt(decl))
+        } else if self.eat_if(TokenTy::Semicolon) {
+            None
+        } else {
+            let init_expr = self.expr();
+            let init = Stmt::Expr(self.alloc_expr(init_expr));
+            self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+            Some(self.alloc_stmt(init))
+        };
+
+        let condition = self.optional_expr(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
+        let increment = self.optional_expr(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
+
+        let body = self.stmt();
+        let for_stmt = ForStmt {
+            init,
+            condition,
+            increment,
+            body: self.alloc_stmt(body),
+        };
+
+        Stmt::For(Box::new_in(for_stmt, self.ast_arena))
     }
 
     fn goto(&mut self) -> Stmt<'src, 'a> {
@@ -382,7 +449,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
     fn expr_stmt(&mut self) -> Stmt<'src, 'a> {
         if let Some(expr) = self.optional_expr(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon) {
-            Stmt::Expr(self.alloc_expr(expr))
+            Stmt::Expr(expr)
         } else {
             Stmt::Nil
         }
@@ -393,6 +460,17 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let expr = self.expr();
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
         Stmt::Return(self.alloc_expr(expr))
+    }
+
+    fn while_stmt(&mut self) -> Stmt<'src, 'a> {
+        self.advance_unchecked();
+
+        self.eat_no_sync(TokenTy::OpenParen, SyntaxError::ExpectedOpenParen);
+        let condition = self.expr();
+        self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
+        let body = self.stmt();
+
+        Stmt::While(self.alloc_expr(condition), self.alloc_stmt(body))
     }
 
     fn poison_expr(&mut self, err: SyntaxError) -> Expr<'src, 'a> {
@@ -407,13 +485,17 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         }
     }
 
-    fn optional_expr(&mut self, ender: TokenTy, err: SyntaxError) -> Option<Expr<'src, 'a>> {
+    fn optional_expr(
+        &mut self,
+        ender: TokenTy,
+        err: SyntaxError,
+    ) -> Option<Box<Expr<'src, 'a>, Alloc<'a>>> {
         if self.eat_if(ender) {
             None
         } else {
             let expr = self.expr();
-            self.eat(TokenTy::Semicolon, err);
-            Some(expr)
+            self.eat(ender, err);
+            Some(self.alloc_expr(expr))
         }
     }
 

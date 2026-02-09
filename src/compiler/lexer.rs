@@ -212,22 +212,32 @@ impl Lexer<'_> {
     /// Check if keyword, else emit identifier
     fn identifier(&mut self, c: char) -> TokenTy {
         match c {
-            'e' => return self.check_keyword(TokenTy::Else, "lse"),
-            'g' => return self.check_keyword(TokenTy::Goto, "oto"),
-            'i' => match self.peek() {
-                'f' => {
-                    self.advance();
-                    return self.check_keyword(TokenTy::If, "");
-                }
-                'n' => {
-                    self.advance();
-                    return self.check_keyword(TokenTy::Int, "t");
-                }
+            'b' => return self.check_keyword(TokenTy::Break, "reak"),
+            'c' => match self.peek() {
+                'a' => return self.check_keyword(TokenTy::Case, "ase"),
+                'o' => return self.check_keyword(TokenTy::Continue, "ontinue"),
                 _ => {}
             },
+
+            'd' => match self.peek() {
+                'e' => return self.check_keyword(TokenTy::Default, "efault"),
+                'o' => return self.check_keyword(TokenTy::Do, "o"),
+                _ => {}
+            },
+            'e' => return self.check_keyword(TokenTy::Else, "lse"),
+            'f' => return self.check_keyword(TokenTy::For, "or"),
+            'g' => return self.check_keyword(TokenTy::Goto, "oto"),
+            'i' => match self.peek() {
+                'f' => return self.check_keyword(TokenTy::If, "f"),
+                'n' => return self.check_keyword(TokenTy::Int, "nt"),
+                _ => {}
+            },
+
             'r' => return self.check_keyword(TokenTy::Return, "eturn"),
+            's' => return self.check_keyword(TokenTy::Switch, "witch"),
             't' => return self.check_keyword(TokenTy::Typedef, "ypedef"),
             'v' => return self.check_keyword(TokenTy::Void, "oid"),
+            'w' => return self.check_keyword(TokenTy::While, "hile"),
             _ => {}
         }
         self.eat_while(char::is_alphanumeric);

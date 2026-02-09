@@ -25,10 +25,21 @@ pub struct Function<'src, 'a, A: Allocator = Global> {
     pub(crate) local_count: usize,
 }
 
+pub struct ForStmt<'src, 'a, A: Allocator> {
+    pub(crate) init: Option<Box<Stmt<'src, 'a, A>, A>>,
+    pub(crate) condition: Option<Box<Expr<'src, 'a, A>, A>>,
+    pub(crate) increment: Option<Box<Expr<'src, 'a, A>, A>>,
+    pub(crate) body: Box<Stmt<'src, 'a, A>, A>,
+}
+
 pub enum Stmt<'src, 'a, A: Allocator = Global> {
+    Break,
     Block(Vec<Stmt<'src, 'a, A>>),
+    Continue,
     Decl(Option<Box<Expr<'src, 'a, A>, A>>),
+    Do(Box<Stmt<'src, 'a, A>, A>, Box<Expr<'src, 'a, A>, A>),
     Expr(Box<Expr<'src, 'a, A>, A>),
+    For(Box<ForStmt<'src, 'a, A>, A>),
     Goto(Label),
     If(
         Box<Expr<'src, 'a, A>, A>,
@@ -38,6 +49,7 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Labled(Label, Box<Stmt<'src, 'a, A>, A>),
     Nil,
     Return(Box<Expr<'src, 'a, A>, A>),
+    While(Box<Expr<'src, 'a, A>, A>, Box<Stmt<'src, 'a, A>, A>),
 }
 
 pub struct Expr<'src, 'a, A: Allocator> {

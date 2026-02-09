@@ -4,7 +4,7 @@ use crate::{
     arena::Arena,
     compiler::{
         asm::Label,
-        ast::{self, AssignOp, BinaryOp, GlobalVar, Identifier, Item, UnaryOp},
+        ast::{self, AssignOp, BinaryOp, GlobalVar, Identifier, Item, UnaryOp, typed::ForStmt},
         error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
         ty::{ScopeStack, Ty, TyInterner},
     },
@@ -51,6 +51,7 @@ pub struct TyChecker<'src, 'a> {
     // Function data
     goto_labels: Vec<GotoLabel<'src>>,
     local_count: usize,
+    loop_depth: usize,
 }
 
 impl<'src, 'a> TyChecker<'src, 'a> {
@@ -63,6 +64,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             label_count: 0,
             goto_labels: Vec::new(),
             local_count: 0,
+            loop_depth: 0,
         }
     }
 
@@ -126,6 +128,16 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     #[inline]
     fn alloc_stmt(&self, stmt: TypedStmt<'src, 'a>) -> Box<TypedStmt<'src, 'a>, Alloc<'a>> {
         Box::new_in(stmt, self.ast_arena)
+    }
+
+    #[inline]
+    fn enter_loop(&mut self) {
+        self.loop_depth += 1;
+    }
+
+    #[inline]
+    fn exit_loop(&mut self) {
+        self.loop_depth -= 1;
     }
 
     fn common_type(
@@ -219,6 +231,25 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 self.var_map.exit_scope(old_scope_bottom);
                 TypedStmt::Block(stmts)
             }
+            Stmt::Break(ctx) => {
+                if self.loop_depth == 0 {
+                    self.log_err(ctx, SemanticError::InvalidBreak);
+                }
+                TypedStmt::Break
+            }
+            Stmt::Continue(ctx) => {
+                if self.loop_depth == 0 {
+                    self.log_err(ctx, SemanticError::InvalidContinue);
+                }
+                TypedStmt::Continue
+            }
+            Stmt::Do(body, condition) => {
+                self.enter_loop();
+                let body = self.stmt(*body);
+                let condition = self.expr(*condition);
+                self.exit_loop();
+                TypedStmt::Do(self.alloc_stmt(body), condition)
+            }
             Stmt::Expr(expr) => TypedStmt::Expr(self.expr(*expr)),
             Stmt::Decl(ident, ty, init) => {
                 if self.var_map.in_scope(&ident.name) {
@@ -236,6 +267,29 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 
                 let init = init.map(|expr| self.expr(*expr));
                 TypedStmt::Decl(init)
+            }
+            Stmt::For(for_stmt) => {
+                self.enter_loop();
+                let old_scope = self.var_map.enter_scope();
+
+                let init = for_stmt
+                    .init
+                    .map(|stmt| self.stmt(*stmt))
+                    .map(|stmt| self.alloc_stmt(stmt));
+                let condition = for_stmt.condition.map(|expr| self.expr(*expr));
+                let increment = for_stmt.increment.map(|expr| self.expr(*expr));
+
+                let body = self.stmt(*for_stmt.body);
+                let for_stmt = ForStmt {
+                    init,
+                    condition,
+                    increment,
+                    body: self.alloc_stmt(body),
+                };
+
+                self.var_map.exit_scope(old_scope);
+                self.exit_loop();
+                TypedStmt::For(Box::new_in(for_stmt, self.ast_arena))
             }
             Stmt::Goto(id) => {
                 let label = self.get_or_make_label(id);
@@ -256,6 +310,13 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             }
             Stmt::Nil => TypedStmt::Nil,
             Stmt::Return(expr) => TypedStmt::Return(self.expr(*expr)),
+            Stmt::While(condition, body) => {
+                self.enter_loop();
+                let condition = self.expr(*condition);
+                let body = self.stmt(*body);
+                self.exit_loop();
+                TypedStmt::While(condition, self.alloc_stmt(body))
+            }
         }
     }
 
