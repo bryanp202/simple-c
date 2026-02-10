@@ -1,5 +1,4 @@
 use std::{
-    ffi::OsString,
     fmt::Display,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
@@ -7,9 +6,10 @@ use std::{
 };
 
 use clap::builder::OsStr;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    CompileArgs, CompileFlags,
+    BuildFlags, CompileArgs, CompileFlags,
     arena::{Arena, TypedArena},
     compiler::{
         error::{BuildError, CompileError},
@@ -32,12 +32,14 @@ mod ty;
 mod tychk;
 
 pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
-    let compile_flags = args.flags();
+    let compile_flags = args.compile_flags();
+    let build_flags = args.build_flags();
+    let out_path = args.output;
 
-    let (asm_files, compile_errors) = compile_units(&args);
+    let (asm_files, compile_errors) = compile_units(compile_flags, args.source);
 
     let result = if compile_errors.is_empty() {
-        assemble(args, &asm_files)
+        assemble(build_flags, &asm_files, out_path)
     } else {
         Err(BuildError::CompileErrors(compile_errors))
     };
@@ -45,45 +47,39 @@ pub fn compile(args: CompileArgs) -> Result<(), BuildError> {
     result
 }
 
-fn compile_units(args: &CompileArgs) -> (Vec<OsString>, Vec<CompileError>) {
-    let mut asm_files = Vec::new();
-    let mut compile_errors = Vec::new();
-    let mut threads = Vec::new();
-    let compile_flags = args.flags();
-    let thread_count = args.threads as usize;
+fn compile_units(
+    compile_flags: CompileFlags,
+    source: Vec<PathBuf>,
+) -> (Vec<PathBuf>, Vec<CompileError>) {
+    let (asm_files, compile_errors): (Vec<_>, Vec<_>) = source
+        .into_par_iter()
+        .enumerate()
+        .map(|(module_num, src_path)| build_unit(compile_flags, src_path, module_num))
+        .partition(Result::is_ok);
 
-    for (batch_num, src_paths) in args.source.chunks(thread_count).enumerate() {
-        for (unit_num, src_path) in src_paths.iter().enumerate() {
-            let src_path = src_path.clone();
-            let module_num = batch_num * thread_count + unit_num;
-            let handle =
-                std::thread::spawn(move || build_unit(compile_flags, src_path, module_num));
-            threads.push(handle);
-        }
-        for handle in threads.drain(..) {
-            match handle.join().unwrap() {
-                Ok(unit_asm_file) => asm_files.push(unit_asm_file.into_os_string()),
-                Err(err) => compile_errors.push(err),
-            }
-        }
-    }
+    let asm_files = asm_files.into_iter().map(Result::unwrap).collect();
+    let compile_errors = compile_errors.into_iter().map(Result::unwrap_err).collect();
 
     (asm_files, compile_errors)
 }
 
-fn assemble(args: CompileArgs, asm_files: &[OsString]) -> Result<(), BuildError> {
-    if args.check_only {
+fn assemble(
+    build_flags: BuildFlags,
+    asm_files: &[PathBuf],
+    out_path: Option<PathBuf>,
+) -> Result<(), BuildError> {
+    if build_flags.check_only {
         return Ok(());
     }
 
-    let mut output_path = args.output.unwrap_or_else(|| PathBuf::from("out"));
+    let mut output_path = out_path.unwrap_or_else(|| PathBuf::from("out"));
     output_path.set_extension("exe");
 
     let output = Command::new("gcc")
         .args(
             asm_files
                 .iter()
-                .map(std::ffi::OsString::as_os_str)
+                .map(|path| path.as_os_str())
                 .chain([&OsStr::from("-o"), output_path.as_os_str()]),
         )
         .output()
@@ -231,7 +227,7 @@ pub fn pretty_print(item: impl Display, name: &str, src_path: &Path) {
     });
 }
 
-fn clean_up_asm_files(compile_flags: CompileFlags, asm_files: &[OsString]) {
+fn clean_up_asm_files(compile_flags: CompileFlags, asm_files: &[PathBuf]) {
     if !compile_flags.emit_asm {
         for asm_file in asm_files {
             _ = std::fs::remove_file(asm_file);

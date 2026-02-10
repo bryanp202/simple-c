@@ -39,9 +39,6 @@ struct CompileArgs {
     /// Compile with no output
     #[arg(short = 'c', long = "check")]
     check_only: bool,
-    /// Number of threads for compilation (1..=16)
-    #[arg(long, default_value = "4", value_parser = clap::value_parser!(u16).range(1..=16), require_equals = true)]
-    threads: u16,
 }
 
 #[derive(Clone, Copy)]
@@ -52,13 +49,24 @@ struct CompileFlags {
     emit_asm: bool,
 }
 
+#[derive(Clone, Copy)]
+struct BuildFlags {
+    check_only: bool,
+}
+
 impl CompileArgs {
-    fn flags(&self) -> CompileFlags {
+    fn compile_flags(&self) -> CompileFlags {
         CompileFlags {
             show_pretty_ast: self.pretty_ast,
             show_pretty_tacky: self.pretty_tacky,
             show_pretty_asm: self.pretty_asm,
             emit_asm: self.emit_asm,
+        }
+    }
+
+    fn build_flags(&self) -> BuildFlags {
+        BuildFlags {
+            check_only: self.check_only,
         }
     }
 }

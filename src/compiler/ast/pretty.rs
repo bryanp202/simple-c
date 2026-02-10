@@ -61,7 +61,10 @@ impl<A: Allocator> Display for super::Function<'_, '_, A> {
 
 #[inline]
 fn sub_stmt_level<A: Allocator>(stmt: &super::Stmt<'_, '_, A>, level: Level) -> Level {
-    if matches!(stmt, &super::Stmt::Block(_) | &super::Stmt::Case(..) | &super::Stmt::Labled(..)) {
+    if matches!(
+        stmt,
+        &super::Stmt::Block(_) | &super::Stmt::Case(..) | &super::Stmt::Labled(..)
+    ) {
         level
     } else {
         level.next()
