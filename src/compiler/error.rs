@@ -15,10 +15,6 @@ type ContextInner = u32;
 pub struct Context(Range<ContextInner>);
 
 impl Context {
-    pub fn dummy() -> Context {
-        Self::from(0..0)
-    }
-
     pub fn from_sub(left: &Context, right: &Context) -> Context {
         Self(left.0.start..right.0.end)
     }
@@ -84,11 +80,6 @@ pub enum CompileError {
         src_path: PathBuf,
         err_cache: ErrorCache<SemanticError>,
     },
-    // SemanticErrors {
-    //     src_path: PathBuf,
-    //     lines_buf: String,
-    //     errors: Vec<()>,
-    // },
 }
 
 impl Display for CompileError {
