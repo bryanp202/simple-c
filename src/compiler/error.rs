@@ -95,12 +95,13 @@ impl Display for CompileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::IoError { src_path, err, msg } => {
-                write!(f, " --> {}", src_path.display())?;
-                write!(f, "io error [{err}]: {msg}")
+                write_err_header(f, err.kind())?;
+                writeln!(f, "  \x1b[1m\x1b[36m-->\x1b[0m {}", src_path.display())?;
+                writeln!(f, "  ({msg})")
             }
             Self::PreprocessorError { src_path, err } => {
-                write!(f, " --> {}", src_path.display())?;
-                write!(f, "error: {err}")
+                write_err_header(f, err)?;
+                writeln!(f, "  \x1b[1m\x1b[36m-->\x1b[0m {}", src_path.display())
             }
             Self::SyntaxErrors {
                 src_path,

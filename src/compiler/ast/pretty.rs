@@ -68,6 +68,15 @@ fn sub_stmt_level<A: Allocator>(stmt: &super::Stmt<'_, '_, A>, level: Level) -> 
     }
 }
 
+#[inline]
+fn block_stmt_level<A: Allocator>(stmt: &super::Stmt<'_, '_, A>, level: Level) -> Level {
+    if matches!(stmt, &super::Stmt::Case(..) | &super::Stmt::Labled(..)) {
+        level
+    } else {
+        level.next()
+    }
+}
+
 impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, level: Level) -> std::fmt::Result {
         let spaces = if matches!(self, super::Stmt::Labled(..)) {
@@ -161,10 +170,9 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
 impl<A: Allocator> Pretty for Vec<super::Stmt<'_, '_, A>> {
     fn pretty(&self, f: &mut std::fmt::Formatter<'_>, level: Level) -> std::fmt::Result {
         let spaces = level.to_spaces();
-        let next_level = level.next();
         writeln!(f, "{{")?;
         for stmt in self {
-            stmt.pretty(f, next_level)?;
+            stmt.pretty(f, block_stmt_level(stmt, level))?;
             writeln!(f)?;
         }
         write!(f, "{: >spaces$}}}", "")

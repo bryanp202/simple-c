@@ -377,7 +377,8 @@ impl<'src> AsmConverter {
 
     fn fix_function(&self, fun: asm::Function<'src>) -> asm::Function<'src> {
         let asm::Function { name, insts } = fun;
-        let mut fixed_insts = vec![asm::Inst::AllocateStack(self.stack)];
+        let mut fixed_insts = Vec::with_capacity(insts.capacity());
+        fixed_insts.push(asm::Inst::AllocateStack(self.stack));
 
         for inst in insts {
             Self::fix_inst(inst, &mut fixed_insts);

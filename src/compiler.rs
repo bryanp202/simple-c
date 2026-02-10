@@ -153,7 +153,7 @@ fn generate_unit(
     i_path: &Path,
 ) -> Result<PathBuf, CompileError> {
     let mut id_interner = Interner::new();
-    let src = match std::fs::read_to_string(&src_path) {
+    let src = match std::fs::read_to_string(&i_path) {
         Ok(src) => src,
         Err(err) => {
             return Err(CompileError::IoError {
