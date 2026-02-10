@@ -149,8 +149,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 
     #[inline]
     fn enter_switch(&mut self) -> Option<SwitchData<'src, 'a>> {
-        let old = std::mem::replace(&mut self.switch_cases, Some((Vec::new(), None)));
-        old
+        self.switch_cases.replace((Vec::new(), None))
     }
 
     #[inline]
@@ -411,7 +410,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         let label = self.new_label();
 
         if let Some(switch_cases) = &mut self.switch_cases {
-            if let None = switch_cases.1 {
+            if switch_cases.1.is_none() {
                 switch_cases.1 = Some(label);
             } else {
                 self.log_err(ctx, SemanticError::MultipleDefaultCases);

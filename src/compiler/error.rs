@@ -45,6 +45,7 @@ impl Index<Context> for String {
 pub enum BuildError {
     AssemblerError(String),
     CompileErrors(Vec<CompileError>),
+    TempdirError(String),
 }
 
 impl Display for BuildError {
@@ -57,6 +58,7 @@ impl Display for BuildError {
                 }
                 Ok(())
             }
+            Self::TempdirError(err) => write_err_header(f, err),
         }
     }
 }
@@ -107,6 +109,10 @@ impl Display for CompileError {
 }
 
 impl CompileError {
+    pub fn from_io_error(src_path: PathBuf, err: std::io::Error, msg: &'static str) -> Self {
+        Self::IoError { src_path, err, msg }
+    }
+
     pub fn from_syntax_errors(
         src: &str,
         src_path: PathBuf,
