@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.54", features = ["derive"] }
-rayon = "1.11.0"
-tempfile = "3.25.0"
-unicode-width = "0.2.2"
+clap = { version = "4.5.54", features = ["derive"]}
+rayon = { version = "1.11.0", default-features = false}
+tempfile = { version = "3.25.0", default-features = false }
+unicode-width = { version = "0.2.2", default-features = false }
 
 [profile.release]
 debug = true
