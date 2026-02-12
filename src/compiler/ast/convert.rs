@@ -2,7 +2,7 @@ use crate::{
     arena::Arena,
     compiler::{
         asm::Label,
-        ast::{self, AssignOp, BinaryOp, UnaryOp},
+        ast::{self, AssignOp, BinaryOp, UnaryOp, typed::CallExpr},
         tacky,
     },
 };
@@ -112,6 +112,7 @@ impl<'src, 'a> Converter {
         let Function {
             name,
             body,
+            param_count,
             local_count,
         } = fun;
         self.reset_for_fn(local_count);
@@ -123,7 +124,7 @@ impl<'src, 'a> Converter {
         // Add catch all null(0) return
         insts.push(tacky::Inst::Ret(tacky::Val::Const(0)));
 
-        tacky::Function { name, insts }
+        tacky::Function { name, param_count, insts }
     }
 
     fn stmt(&mut self, stmt: Stmt<'src, 'a>, insts: &mut Vec<tacky::Inst<'src>>) {
@@ -270,7 +271,7 @@ impl<'src, 'a> Converter {
             ExprTy::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
             ExprTy::Unary(op, expr) => self.unary(op, *expr, insts),
             ExprTy::DecInc(op, expr) => self.dec_inc(op, *expr, insts),
-            ExprTy::Call(..) => todo!(),
+            ExprTy::Call(call_expr) => self.call(*call_expr, insts),
             ExprTy::Global(name) => tacky::Val::GlobalVar(name),
             ExprTy::Local(id) => tacky::Val::Temp(id),
             ExprTy::Constant(imm) => tacky::Val::Const(imm),
@@ -492,6 +493,24 @@ impl<'src, 'a> Converter {
             rhs: tacky::Val::Const(1),
             dst: operand,
         });
+        dst
+    }
+
+    fn call(
+        &mut self,
+        call_expr: CallExpr<'src, 'a, Alloc<'a>>,
+        insts: &mut Vec<tacky::Inst<'src>>,
+    ) -> tacky::Val<'src> {
+        let operand = self.expr(*call_expr.operand, insts);
+
+        let mut args = Vec::with_capacity(call_expr.args.len());
+
+        for arg in call_expr.args {
+            args.push(self.expr(*arg, insts));
+        }
+
+        let dst = self.new_temp();
+        insts.push(tacky::Inst::Call { operand, args, dst });
         dst
     }
 }

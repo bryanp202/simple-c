@@ -5,6 +5,14 @@ use crate::{
 
 mod pretty;
 
+const WINDOWS_SHADOW_SPACE: usize = 32;
+const CALL_REGS: [asm::Operand<'static>; 4] = [
+    asm::Operand::Reg(Reg::CX),
+    asm::Operand::Reg(Reg::DX),
+    asm::Operand::Reg(Reg::R8),
+    asm::Operand::Reg(Reg::R9),
+];
+
 pub struct Program<'src> {
     pub(crate) functions: Vec<Function<'src>>,
     pub(crate) globals: Vec<GlobalVar<'src>>,
@@ -16,11 +24,18 @@ pub struct GlobalVar<'src> {
 
 pub struct Function<'src> {
     pub(crate) name: Interned<'src, str>,
+    pub(crate) param_count: usize,
     pub(crate) insts: Vec<Inst<'src>>,
 }
 
 pub enum Inst<'src> {
     Ret(Val<'src>),
+    /// TODO: Make smaller, maybe replace with Arg instructions
+    Call {
+        operand: Val<'src>,
+        args: Vec<Val<'src>>,
+        dst: Val<'src>,
+    },
     Copy {
         src: Val<'src>,
         dst: Val<'src>,
@@ -77,8 +92,8 @@ pub enum BinaryOp {
 }
 
 pub struct AsmConverter {
-    stack: usize,
-    registers: Vec<Option<usize>>, // Stores the offset of each pseudo register
+    stack: isize,
+    registers: Vec<Option<isize>>, // Stores the offset of each pseudo register
 }
 
 impl Default for AsmConverter {
@@ -102,21 +117,25 @@ impl AsmConverter {
     }
 }
 
+fn with_align(num: isize, align: isize) -> isize {
+    (num + (align - 1)) & !(align - 1)
+}
+
 impl<'src> AsmConverter {
     fn reset_for_fn(&mut self) {
         self.stack = 0;
         self.registers.clear();
     }
 
-    fn reserve_or_get(&mut self, pseudo_id: usize, size: usize, align: usize) -> usize {
+    fn reserve_or_get(&mut self, pseudo_id: usize, size: isize, align: isize) -> isize {
         if let Some(&Some(pos)) = self.registers.get(pseudo_id) {
             return pos;
         }
 
         // Align the stack to `align` boundary
-        self.stack = (self.stack + (align - 1)) & !(align - 1);
+        self.stack = with_align(self.stack, align);
         self.stack += size;
-        let pos = self.stack;
+        let pos = -self.stack;
 
         // Check if temp registers are being accessed out of order
         if self.registers.len() <= pseudo_id {
@@ -148,8 +167,18 @@ impl<'src> AsmConverter {
     }
 
     fn convert_fun(&mut self, fun: Function<'src>) -> asm::Function<'src> {
-        let Function { name, insts } = fun;
+        let Function { name, param_count, insts } = fun;
         let mut asm_insts = Vec::new();
+
+        // Move params to stack
+        for (param, reg) in (0..param_count).zip(CALL_REGS) {
+            asm_insts.push(asm::Inst::Mov(reg, Operand::Psuedo(param)));
+        }
+        // Stack based arguments
+        for param in CALL_REGS.len()..param_count {
+            let src = Operand::Stack(param as isize * 8 + 16);
+            asm_insts.push(asm::Inst::Mov(src, Operand::Psuedo(param)));
+        }
 
         for inst in insts {
             self.convert_inst(inst, &mut asm_insts);
@@ -168,6 +197,7 @@ impl<'src> AsmConverter {
             }
             Inst::Unary { op, src, dst } => Self::convert_unary(op, src, dst, asm_insts),
             // Control flow
+            Inst::Call { operand, args, dst } => Self::convert_call(operand, &args, dst, asm_insts),
             Inst::Label(label) => asm::Inst::Label(label),
             Inst::Jump(label) => asm::Inst::Jump(label),
             Inst::JumpIfZero(src, label) => {
@@ -292,11 +322,52 @@ impl<'src> AsmConverter {
         }
     }
 
+    fn convert_call(
+        operand: Val<'src>,
+        args: &[Val<'src>],
+        dst: Val<'src>,
+        asm_insts: &mut Vec<asm::Inst<'src>>,
+    ) -> asm::Inst<'src> {
+        let allocated_stack = if let [_, _, _, _, rest @ ..] = args {
+            // Fix 16 byte alignment if needed
+            let stack_padding = if rest.len().is_multiple_of(2) {
+                0
+            } else {
+                asm_insts.push(asm::Inst::Push(asm::Operand::Reg(Reg::AX)));
+                8
+            };
+
+            for (val, reg) in args[0..4].iter().zip(CALL_REGS) {
+                asm_insts.push(asm::Inst::Mov(Self::convert_val(*val), reg));
+            }
+
+            for val in rest.iter().rev() {
+                asm_insts.push(asm::Inst::Push(Self::convert_val(*val)));
+            }
+
+            stack_padding + rest.len() * 8
+        } else {
+            for (val, reg) in args.iter().zip(CALL_REGS) {
+                asm_insts.push(asm::Inst::Mov(Self::convert_val(*val), reg));
+            }
+            0
+        };
+
+        // Add windows shadow space
+        asm_insts.push(asm::Inst::AllocateStack(WINDOWS_SHADOW_SPACE));
+        asm_insts.push(asm::Inst::Call(Self::convert_val(operand)));
+        // Clean up shadow space + allocated space
+        asm_insts.push(asm::Inst::DeallocateStack(WINDOWS_SHADOW_SPACE + allocated_stack));
+
+        asm::Inst::Mov(Operand::Reg(Reg::AX), Self::convert_val(dst))
+
+    }
+
     fn convert_val(val: Val) -> asm::Operand {
         match val {
             Val::Const(imm) => asm::Operand::Imm(imm),
             Val::Temp(id) => asm::Operand::Psuedo(id),
-            Val::GlobalVar(_) => todo!(),
+            Val::GlobalVar(name) => asm::Operand::GlobalVar(name),
         }
     }
 }
@@ -336,6 +407,8 @@ impl<'src> AsmConverter {
             asm::Inst::Binary(op, src, dst) => {
                 asm::Inst::Binary(op, self.fill_operand(src), self.fill_operand(dst))
             }
+            // Control flow
+            asm::Inst::Call(operand) => asm::Inst::Call(self.fill_operand(operand)),
             // Special
             asm::Inst::IDiv(operand) => asm::Inst::IDiv(self.fill_operand(operand)),
             // Other
@@ -344,8 +417,11 @@ impl<'src> AsmConverter {
             }
             asm::Inst::Cmp(a, b) => asm::Inst::Cmp(self.fill_operand(a), self.fill_operand(b)),
             asm::Inst::SetCC(op, dst) => asm::Inst::SetCC(op, self.fill_operand(dst)),
+            asm::Inst::Pop(dst) => asm::Inst::Pop(self.fill_operand(dst)),
+            asm::Inst::Push(src) => asm::Inst::Push(self.fill_operand(src)),
             // No changes needed
             asm::Inst::AllocateStack(_)
+            | asm::Inst::DeallocateStack(_)
             | asm::Inst::Cdq
             | asm::Inst::Jump(_)
             | asm::Inst::Label(_)
@@ -378,7 +454,7 @@ impl<'src> AsmConverter {
     fn fix_function(&self, fun: asm::Function<'src>) -> asm::Function<'src> {
         let asm::Function { name, insts } = fun;
         let mut fixed_insts = Vec::with_capacity(insts.capacity());
-        fixed_insts.push(asm::Inst::AllocateStack(self.stack));
+        fixed_insts.push(asm::Inst::AllocateStack(with_align(self.stack, 16).unsigned_abs()));
 
         for inst in insts {
             Self::fix_inst(inst, &mut fixed_insts);
@@ -422,6 +498,8 @@ impl<'src> AsmConverter {
             }
 
             asm::Inst::AllocateStack(_)
+            | asm::Inst::DeallocateStack(_)
+            | asm::Inst::Call(_)
             | asm::Inst::Cdq
             | asm::Inst::Cmp(..)
             | asm::Inst::Mov(..)
@@ -430,7 +508,9 @@ impl<'src> AsmConverter {
             | asm::Inst::Jump(_)
             | asm::Inst::JumpCC(..)
             | asm::Inst::Label(_)
-            | asm::Inst::SetCC(..) => inst,
+            | asm::Inst::SetCC(..)
+            | asm::Inst::Pop(_)
+            | asm::Inst::Push(_) => inst,
         };
         fixed_insts.push(last_inst);
     }

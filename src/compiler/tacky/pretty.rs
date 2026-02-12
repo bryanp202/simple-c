@@ -83,6 +83,16 @@ impl Display for super::Inst<'_> {
             Self::Binary { op, lhs, rhs, dst } => {
                 write!(f, "{dst} <- {lhs} {op} {rhs}")
             }
+            Self::Call { operand, args, dst } => {
+                write!(f, "{dst} <- {operand}(")?;
+                if let Some(first) = args.first() {
+                    write!(f, "{first}")?;
+                    for param in &args[1..] {
+                        write!(f, ", {param}")?;
+                    }
+                }
+                write!(f, ")")
+            }
             Self::Copy { src, dst } => write!(f, "{dst} <- {src}"),
             Self::Jump(label) => write!(f, "jmp {label}"),
             Self::JumpIfNotZero(src, label) => write!(f, "jnz {src} {label}"),

@@ -39,7 +39,7 @@ impl<A: Allocator> Display for super::Program<'_, '_, A> {
 impl<A: Allocator> Display for super::Item<'_, '_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::FnDecl(decl) => write!(f, "{decl}"),
+            Self::FnDecl(decl) => write!(f, "{decl};"),
             Self::FnDef(def) => write!(f, "{def}"),
             Self::Var(global) => write!(f, "{global}"),
         }
@@ -54,7 +54,7 @@ impl Display for super::GlobalVar<'_> {
 
 impl Display for super::FunctionDecl<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {};", self.ty, self.id.name)
+        write!(f, "{} {}", self.ty, self.id.name)
     }
 }
 

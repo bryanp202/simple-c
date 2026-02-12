@@ -28,6 +28,7 @@ pub enum Inst<'src> {
     Unary(UnaryOp, Operand<'src>),
     Binary(BinaryOp, Operand<'src>, Operand<'src>),
     // Control flow
+    Call(Operand<'src>),
     Label(Label),
     Jump(Label),
     JumpCC(CompareOp, Label),
@@ -36,10 +37,13 @@ pub enum Inst<'src> {
     SetCC(CompareOp, Operand<'src>),
     Cdq,
     Mov(Operand<'src>, Operand<'src>),
+    Pop(Operand<'src>),
+    Push(Operand<'src>),
     // Special
     IDiv(Operand<'src>),
     // Function
     AllocateStack(usize),
+    DeallocateStack(usize),
     Ret,
 }
 
@@ -51,7 +55,7 @@ pub enum Operand<'src> {
     Imm(i32),
     Reg(Reg),
     Psuedo(usize),
-    Stack(usize),
+    Stack(isize),
     GlobalVar(Interned<'src, str>),
 }
 
@@ -115,6 +119,8 @@ pub enum Reg {
     AX,
     CX,
     DX,
+    R8,
+    R9,
     R10,
     R11,
 }
@@ -176,6 +182,7 @@ impl Display for Inst<'_> {
                 write!(f, "{op} {}, {}", src.display_d(), dst.display_d())
             }
             // Control flow
+            Self::Call(fun) => write!(f, "call {}", fun.display_q()),
             Self::Label(label) => write!(f, "{label}:"),
             Self::Jump(label) => write!(f, "jmp {label}"),
             Self::JumpCC(cc, label) => write!(f, "j{cc} {label}"),
@@ -186,8 +193,11 @@ impl Display for Inst<'_> {
             Self::SetCC(cc, dst) => write!(f, "set{cc} {}", dst.display_b()),
             Self::Cdq => write!(f, "cdq"),
             Self::Mov(src, dst) => write!(f, "movl {}, {}", src.display_d(), dst.display_d()),
+            Self::Pop(dst) => write!(f, "popq {}", dst.display_q()),
+            Self::Push(src) => write!(f, "pushq {}", src.display_q()),
             // Function
             Self::AllocateStack(amt) => write!(f, "subq ${amt}, %rsp"),
+            Self::DeallocateStack(amt) => write!(f, "addq ${amt}, %rsp"),
             Self::Ret => {
                 writeln!(f, "movq %rbp, %rsp")?;
                 writeln!(f, "    popq %rbp")?;
@@ -250,7 +260,7 @@ impl Display for OneByteOperand<'_> {
         match self.0 {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_one_byte()),
-            Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
             Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
@@ -262,7 +272,7 @@ impl Display for TwoByteOperand<'_> {
         match self.0 {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_two_byte()),
-            Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
             Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
@@ -274,7 +284,7 @@ impl Display for FourByteOperand<'_> {
         match self.0 {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_four_byte()),
-            Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
             Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
@@ -286,7 +296,7 @@ impl Display for EightByteOperand<'_> {
         match self.0 {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_eight_byte()),
-            Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
+            Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
             Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
@@ -299,6 +309,8 @@ impl Reg {
             Self::AX => "al",
             Self::CX => "cl",
             Self::DX => "dl",
+            Self::R8 => "r8b",
+            Self::R9 => "r9b",
             Self::R10 => "r10b",
             Self::R11 => "r11b",
         }
@@ -309,6 +321,8 @@ impl Reg {
             Self::AX => "ax",
             Self::CX => "cx",
             Self::DX => "dx",
+            Self::R8 => "r8w",
+            Self::R9 => "r9w",
             Self::R10 => "r10w",
             Self::R11 => "r11w",
         }
@@ -319,6 +333,8 @@ impl Reg {
             Self::AX => "eax",
             Self::CX => "ecx",
             Self::DX => "edx",
+            Self::R8 => "r8d",
+            Self::R9 => "r9d",
             Self::R10 => "r10d",
             Self::R11 => "r11d",
         }
@@ -329,6 +345,8 @@ impl Reg {
             Self::AX => "rax",
             Self::CX => "rcx",
             Self::DX => "rdx",
+            Self::R8 => "r8",
+            Self::R9 => "r9",
             Self::R10 => "r10",
             Self::R11 => "r11",
         }

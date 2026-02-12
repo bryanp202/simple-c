@@ -363,6 +363,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         TypedFunction {
             name,
             body,
+            param_count: params.len(),
             local_count: self.local_count,
         }
     }
