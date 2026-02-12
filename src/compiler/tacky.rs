@@ -167,7 +167,11 @@ impl<'src> AsmConverter {
     }
 
     fn convert_fun(&mut self, fun: Function<'src>) -> asm::Function<'src> {
-        let Function { name, param_count, insts } = fun;
+        let Function {
+            name,
+            param_count,
+            insts,
+        } = fun;
         let mut asm_insts = Vec::new();
 
         // Move params to stack
@@ -357,10 +361,11 @@ impl<'src> AsmConverter {
         asm_insts.push(asm::Inst::AllocateStack(WINDOWS_SHADOW_SPACE));
         asm_insts.push(asm::Inst::Call(Self::convert_val(operand)));
         // Clean up shadow space + allocated space
-        asm_insts.push(asm::Inst::DeallocateStack(WINDOWS_SHADOW_SPACE + allocated_stack));
+        asm_insts.push(asm::Inst::DeallocateStack(
+            WINDOWS_SHADOW_SPACE + allocated_stack,
+        ));
 
         asm::Inst::Mov(Operand::Reg(Reg::AX), Self::convert_val(dst))
-
     }
 
     fn convert_val(val: Val) -> asm::Operand {
@@ -454,7 +459,9 @@ impl<'src> AsmConverter {
     fn fix_function(&self, fun: asm::Function<'src>) -> asm::Function<'src> {
         let asm::Function { name, insts } = fun;
         let mut fixed_insts = Vec::with_capacity(insts.capacity());
-        fixed_insts.push(asm::Inst::AllocateStack(with_align(self.stack, 16).unsigned_abs()));
+        fixed_insts.push(asm::Inst::AllocateStack(
+            with_align(self.stack, 16).unsigned_abs(),
+        ));
 
         for inst in insts {
             Self::fix_inst(inst, &mut fixed_insts);

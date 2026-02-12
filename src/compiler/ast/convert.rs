@@ -124,7 +124,11 @@ impl<'src, 'a> Converter {
         // Add catch all null(0) return
         insts.push(tacky::Inst::Ret(tacky::Val::Const(0)));
 
-        tacky::Function { name, param_count, insts }
+        tacky::Function {
+            name,
+            param_count,
+            insts,
+        }
     }
 
     fn stmt(&mut self, stmt: Stmt<'src, 'a>, insts: &mut Vec<tacky::Inst<'src>>) {
