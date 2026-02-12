@@ -290,12 +290,12 @@ impl<'src, 'a> Converter {
         else_branch: Expr<'src, 'a>,
         insts: &mut Vec<tacky::Inst<'src>>,
     ) -> tacky::Val<'src> {
-        let dst = self.new_temp();
         let cond_result = self.expr(cond, insts);
         let else_label = self.new_label();
         insts.push(tacky::Inst::JumpIfZero(cond_result, else_label));
 
         let then_result = self.expr(then_branch, insts);
+        let dst = self.new_temp();
         insts.push(tacky::Inst::Copy {
             src: then_result,
             dst,
