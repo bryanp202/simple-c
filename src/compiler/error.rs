@@ -158,17 +158,16 @@ pub struct ErrorWithCtx<E: Display> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SyntaxError {
     ExpectedColon,
-    ExpectedFunctionArgs,
+    ExpectedExpr,
     ExpectedIdentifier,
     ExpectedOpenParen,
     ExpectedSemicolon,
     ExpectedWhile,
     IntegerLiteralTooLarge,
-    InvalidLabel,
-    InvalidExpr,
     InvalidIntegerSuffix,
     UnclosedDelimiter,
     UnknownSymbol,
+    UnnamedParamsWithFunctionBody,
     UnterminatedBlockComment,
 }
 
@@ -176,17 +175,18 @@ impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::ExpectedColon => "expected a ':' after conditional then branch",
-            Self::ExpectedFunctionArgs => "expected function args after function identifier",
+            Self::ExpectedExpr => "expected a valid expression",
             Self::ExpectedIdentifier => "expected an identifier",
             Self::ExpectedOpenParen => "expected a '('",
             Self::ExpectedSemicolon => "expected a ';'",
             Self::ExpectedWhile => "expected 'while' after do loop body",
             Self::IntegerLiteralTooLarge => "integer literal too large",
-            Self::InvalidLabel => "invalid label",
-            Self::InvalidExpr => "invalid expression",
             Self::InvalidIntegerSuffix => "invalid integer suffix",
             Self::UnclosedDelimiter => "unclosed delimiter",
             Self::UnknownSymbol => "unknown symbol",
+            Self::UnnamedParamsWithFunctionBody => {
+                "function declarations with unnamed parameters cannot have a function body"
+            }
             Self::UnterminatedBlockComment => "unterminated block comment",
         };
         let error_code = *self as usize;
@@ -198,12 +198,16 @@ impl Display for SyntaxError {
 pub enum SemanticError {
     DuplicateCase,
     DuplicateDecl,
+    DuplicateDef,
+    ExpectedFunctionType,
+    InvalidArgCount,
     InvalidBreak,
     InvalidCase,
     InvalidCaseExpr,
     InvalidContinue,
     InvalidLValue,
     MultipleDefaultCases,
+    TypeMismatch,
     UndeclaredVar,
 }
 
@@ -212,12 +216,16 @@ impl Display for SemanticError {
         let msg = match self {
             Self::DuplicateCase => "duplicate switch cases",
             Self::DuplicateDecl => "duplicate declaration",
+            Self::DuplicateDef => "duplicate definition",
+            Self::ExpectedFunctionType => "expected function type",
+            Self::InvalidArgCount => "invalid arg count",
             Self::InvalidBreak => "break must be in loop or switch",
             Self::InvalidCase => "case and default must be defined in a switch",
             Self::InvalidCaseExpr => "case expression must be an int literal",
             Self::InvalidContinue => "continue must be in loop",
             Self::InvalidLValue => "invalid lvalue",
             Self::MultipleDefaultCases => "multiple default cases defined",
+            Self::TypeMismatch => "type mismatch",
             Self::UndeclaredVar => "use of undeclared variable",
         };
         let error_code = *self as usize;
@@ -430,11 +438,11 @@ fn multiline_err_cache_test() {
     let errors = vec![
         ErrorWithCtx::<SyntaxError> {
             ctx: Context::from(17..src.len()),
-            err: SyntaxError::InvalidExpr,
+            err: SyntaxError::ExpectedExpr,
         },
         ErrorWithCtx::<SyntaxError> {
             ctx: Context::from(11..17),
-            err: SyntaxError::InvalidExpr,
+            err: SyntaxError::ExpectedExpr,
         },
     ];
     let error_msg = CompileError::from_syntax_errors(src, "test.c".into(), errors).to_string();

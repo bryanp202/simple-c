@@ -18,3 +18,5 @@ Pretty print should would like Register Display
 Make ast pretty print better: potentially switch to printing explicit src program?
 
 Should goto label resolution be able to do errors on all uses of undeclared label use, or just the first one?
+
+Global synchronize for that just goes until type?

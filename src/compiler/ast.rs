@@ -12,7 +12,8 @@ mod pretty;
 pub mod typed;
 
 pub enum Item<'src, 'a, A: Allocator = Global> {
-    Fn(Function<'src, 'a, A>),
+    FnDecl(FunctionDecl<'src, 'a>),
+    FnDef(FunctionDef<'src, 'a, A>),
     Var(GlobalVar<'src>),
 }
 
@@ -21,11 +22,18 @@ pub struct Program<'src, 'a, A: Allocator = Global> {
 }
 
 pub struct GlobalVar<'src> {
-    pub(crate) name: Interned<'src, str>,
+    pub(crate) id: Identifier<'src>,
 }
 
-pub struct Function<'src, 'a, A: Allocator = Global> {
-    pub(crate) name: Interned<'src, str>,
+pub struct FunctionDecl<'src, 'a> {
+    pub(crate) ty: Interned<'a, Ty<'src, 'a>>,
+    pub(crate) id: Identifier<'src>,
+    pub(crate) ret: Interned<'a, Ty<'src, 'a>>,
+    pub(crate) param_names: Vec<Identifier<'src>>,
+}
+
+pub struct FunctionDef<'src, 'a, A: Allocator = Global> {
+    pub(crate) decl: FunctionDecl<'src, 'a>,
     pub(crate) body: Vec<Stmt<'src, 'a, A>>,
 }
 
@@ -58,6 +66,7 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
     Do(Box<Stmt<'src, 'a, A>, A>, Box<Expr<'src, A>, A>),
     Expr(Box<Expr<'src, A>, A>),
     For(Box<ForStmt<'src, 'a, A>, A>),
+    FunctionDecl(Box<FunctionDecl<'src, 'a>, A>),
     Goto(Identifier<'src>),
     If(
         Box<Expr<'src, A>, A>,
@@ -76,6 +85,11 @@ pub struct Expr<'src, A: Allocator> {
     pub(crate) ctx: Context,
 }
 
+pub struct CallExpr<'src, A: Allocator> {
+    pub(crate) operand: Box<Expr<'src, A>, A>,
+    pub(crate) args: Vec<Box<Expr<'src, A>, A>>,
+}
+
 pub enum ExprTy<'src, A: Allocator> {
     Ternary(
         Box<Expr<'src, A>, A>,
@@ -86,6 +100,7 @@ pub enum ExprTy<'src, A: Allocator> {
     Binary(BinaryOp, Box<Expr<'src, A>, A>, Box<Expr<'src, A>, A>), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, A>, A>),                          // Op, operand
     DecInc(UnaryOp, Box<Expr<'src, A>, A>), // Op, operand (op is either ++ or --)
+    Call(Box<CallExpr<'src, A>, A>),
     Var(Interned<'src, str>),
     Constant(i32),
     Poisoned,

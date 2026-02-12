@@ -148,8 +148,8 @@ impl Display for GlobalVar<'_> {
 impl Display for Function<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Function { name, insts } = self;
-        writeln!(f, "    .globl {}", name.get())?;
-        writeln!(f, "{}:", name.get())?;
+        writeln!(f, "    .globl {name}")?;
+        writeln!(f, "{name}:")?;
         writeln!(f, "    pushq %rbp")?;
         writeln!(f, "    movq %rsp, %rbp")?;
         for inst in insts {
@@ -251,7 +251,7 @@ impl Display for OneByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_one_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
+            Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -263,7 +263,7 @@ impl Display for TwoByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_two_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
+            Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -275,7 +275,7 @@ impl Display for FourByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_four_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
+            Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -287,7 +287,7 @@ impl Display for EightByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_eight_byte()),
             Operand::Stack(offset) => write!(f, "-{offset}(%rsp)"),
-            Operand::GlobalVar(name) => write!(f, "{}", name.get()),
+            Operand::GlobalVar(name) => write!(f, "{name}"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }

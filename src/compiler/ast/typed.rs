@@ -70,6 +70,11 @@ pub struct Expr<'src, 'a, A: Allocator> {
     pub(crate) ty: Interned<'a, Ty<'src, 'a>>,
 }
 
+pub struct CallExpr<'src, 'a, A: Allocator> {
+    pub(crate) operand: Box<Expr<'src, 'a, A>, A>,
+    pub(crate) args: Vec<Box<Expr<'src, 'a, A>, A>, A>,
+}
+
 pub enum ExprTy<'src, 'a, A: Allocator> {
     Ternary(
         Box<Expr<'src, 'a, A>, A>,
@@ -88,6 +93,7 @@ pub enum ExprTy<'src, 'a, A: Allocator> {
     ), // Op, lhs, rhs
     Unary(UnaryOp, Box<Expr<'src, 'a, A>, A>), // Op, operand
     DecInc(UnaryOp, Box<Expr<'src, 'a, A>, A>), // Op, operand (op is either ++ or --)
+    Call(Box<CallExpr<'src, 'a, A>, A>),
     Global(Interned<'src, str>),
     Local(usize),
     Constant(i32),

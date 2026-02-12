@@ -31,6 +31,7 @@ pub enum TokenTy {
     CloseSquare,
     Semicolon,
     Tilde,
+    Comma,
     Dot,
     QuestionMark,
     Colon,

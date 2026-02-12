@@ -12,7 +12,7 @@ pub enum Ty<'src, 'a> {
     Int,
     Function {
         ret: Interned<'a, Ty<'src, 'a>>,
-        args: Vec<Interned<'a, Ty<'src, 'a>>>,
+        params: Vec<Interned<'a, Ty<'src, 'a>>>,
     },
     Adt {
         def: Interned<'src, str>,
@@ -26,7 +26,28 @@ impl Display for Ty<'_, '_> {
         match self {
             Self::Int => write!(f, "int"),
             Self::Poisoned => write!(f, "poisoned"),
-            Self::Function { .. } | Self::Adt { .. } => todo!("Ty display"),
+            Self::Function { ret, params } => {
+                write!(f, "{ret}(")?;
+                if let Some(first) = params.first() {
+                    write!(f, "{first}")?;
+                    for param in &params[1..] {
+                        write!(f, ", {param}")?;
+                    }
+                }
+                write!(f, ")")
+            }
+            Self::Adt { .. } => todo!("adt ty display"),
+        }
+    }
+}
+
+impl<'src, 'a> Ty<'src, 'a> {
+    pub fn eq_or_poison(&self, other: &Ty<'src, 'a>) -> bool {
+        match (self, other) {
+            (Self::Poisoned, Self::Poisoned) => true,
+            (Self::Poisoned, _) => true,
+            (_, Self::Poisoned) => true,
+            _ => self == other,
         }
     }
 }
@@ -82,6 +103,14 @@ impl<K: PartialEq + Eq, V> ScopeStack<K, V> {
 
     pub fn get(&self, key: &K) -> Option<&V> {
         self.stack
+            .iter()
+            .rev()
+            .find(|(k, _)| key == k)
+            .map(|(_, val)| val)
+    }
+
+    pub fn get_in_scope(&self, key: &K) -> Option<&V> {
+        self.stack[self.scope_bottom..]
             .iter()
             .rev()
             .find(|(k, _)| key == k)

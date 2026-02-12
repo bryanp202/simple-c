@@ -39,7 +39,8 @@ impl<A: Allocator> Display for super::Program<'_, '_, A> {
 impl<A: Allocator> Display for super::Item<'_, '_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Fn(fun) => write!(f, "{fun}"),
+            Self::FnDecl(decl) => write!(f, "{decl}"),
+            Self::FnDef(def) => write!(f, "{def}"),
             Self::Var(global) => write!(f, "{global}"),
         }
     }
@@ -47,14 +48,19 @@ impl<A: Allocator> Display for super::Item<'_, '_, A> {
 
 impl Display for super::GlobalVar<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "global \"{}\";", self.name.get())
+        write!(f, "global \"{}\";", self.id.name)
     }
 }
 
-impl<A: Allocator> Display for super::Function<'_, '_, A> {
+impl Display for super::FunctionDecl<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = self.name.get();
-        writeln!(f, "fn {name}")?;
+        write!(f, "{} {};", self.ty, self.id.name)
+    }
+}
+
+impl<A: Allocator> Display for super::FunctionDef<'_, '_, A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}", self.decl)?;
         self.body.pretty(f, Level::new())
     }
 }
@@ -102,7 +108,7 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
             }
             Self::Continue(_) => write!(f, "continue;"),
             Self::Decl(id, ty, init) => {
-                write!(f, "{} {}", ty.get(), id.name.get())?;
+                write!(f, "{ty} {}", id.name)?;
                 if let Some(init) = init {
                     write!(f, " = {init};")
                 } else {
@@ -135,7 +141,8 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                     .body
                     .pretty(f, sub_stmt_level(&for_stmt.body, level))
             }
-            Self::Goto(id) => write!(f, "goto {};", id.name.get()),
+            Self::FunctionDecl(decl) => write!(f, "{decl};"),
+            Self::Goto(id) => write!(f, "goto {};", id.name),
             Self::If(condition, then_branch, else_branch) => {
                 writeln!(f, "if ({})", condition)?;
                 then_branch.pretty(f, sub_stmt_level(then_branch, level))?;
@@ -153,7 +160,7 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                 }
             }
             Self::Labled(id, stmt) => {
-                writeln!(f, "{}:", id.name.get())?;
+                writeln!(f, "{}:", id.name)?;
                 stmt.pretty(f, level)
             }
             Self::Nil => write!(f, ";"),
@@ -194,7 +201,17 @@ impl<A: Allocator> Display for super::Expr<'_, A> {
                 write!(f, "({condition} ? {else_branch} : {then_branch})")
             }
             super::ExprTy::Unary(op, operand) => write!(f, "({op}{operand})"),
-            super::ExprTy::Var(id) => write!(f, "{}", id.get()),
+            super::ExprTy::Var(id) => write!(f, "{id}"),
+            super::ExprTy::Call(call) => {
+                write!(f, "{}(", call.operand)?;
+                if let Some(first) = call.args.first() {
+                    write!(f, "{first}")?;
+                    for param in &call.args[1..] {
+                        write!(f, ", {param}")?;
+                    }
+                }
+                write!(f, ")")
+            }
         }
     }
 }

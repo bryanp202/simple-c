@@ -39,6 +39,7 @@ impl<'src> Lexer<'src> {
             '[' => TokenTy::OpenSquare,
             ']' => TokenTy::CloseSquare,
             '.' => TokenTy::Dot,
+            ',' => TokenTy::Comma,
             '~' => TokenTy::Tilde,
             ';' => TokenTy::Semicolon,
             ':' => TokenTy::Colon,

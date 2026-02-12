@@ -270,6 +270,7 @@ impl<'src, 'a> Converter {
             ExprTy::Binary(op, lhs, rhs) => self.binary(op, *lhs, *rhs, insts),
             ExprTy::Unary(op, expr) => self.unary(op, *expr, insts),
             ExprTy::DecInc(op, expr) => self.dec_inc(op, *expr, insts),
+            ExprTy::Call(..) => todo!(),
             ExprTy::Global(name) => tacky::Val::GlobalVar(name),
             ExprTy::Local(id) => tacky::Val::Temp(id),
             ExprTy::Constant(imm) => tacky::Val::Const(imm),

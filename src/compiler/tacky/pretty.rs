@@ -15,13 +15,13 @@ impl Display for super::Program<'_> {
 
 impl Display for super::GlobalVar<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "    global {}", self.name.get())
+        write!(f, "    global {}", self.name)
     }
 }
 
 impl Display for super::Function<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "    fn {}:", self.name.get())?;
+        writeln!(f, "    fn {}:", self.name)?;
         for inst in &self.insts {
             writeln!(f, "{inst}")?;
         }
@@ -69,7 +69,7 @@ impl Display for super::Val<'_> {
         match self {
             Self::Const(imm) => write!(f, "${imm}"),
             Self::Temp(id) => write!(f, ".tmp{id}"),
-            Self::GlobalVar(id) => write!(f, "{}", id.get()),
+            Self::GlobalVar(id) => write!(f, "{id}"),
         }
     }
 }

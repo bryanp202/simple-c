@@ -1,13 +1,26 @@
-use std::{collections::HashSet, fmt::Debug, hash::Hash, ptr};
+use std::{
+    collections::HashSet,
+    fmt::{Debug, Display},
+    hash::Hash,
+    ops::Deref,
+    ptr,
+};
 
 use crate::arena::TypedArena;
 
 #[derive(Eq)]
 pub struct Interned<'a, T: ?Sized + Eq + Hash>(&'a T);
 
-impl<'a, T: ?Sized + Eq + Hash> Interned<'a, T> {
-    pub fn get(&self) -> &'a T {
-        self.0
+impl<T: ?Sized + Eq + Hash> Deref for Interned<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: ?Sized + Eq + Display + Hash> Display for Interned<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -127,9 +140,9 @@ fn lookup_test() {
     let id1_again = interner.intern("Hello world!");
     let id2 = interner.intern("Cool");
 
-    assert_eq!(id1.get(), "Hello world!");
-    assert_eq!(id1_again.get(), "Hello world!");
-    assert_eq!(id2.get(), "Cool");
+    assert_eq!(&*id1, "Hello world!");
+    assert_eq!(&*id1_again, "Hello world!");
+    assert_eq!(&*id2, "Cool");
 
     assert_eq!(id1, id1_again);
 }
