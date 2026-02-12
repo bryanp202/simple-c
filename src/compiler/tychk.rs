@@ -320,7 +320,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 is_defined: false,
                 ty: fun.decl.ty,
             });
-        match (symbol.is_defined, fun.decl.ty == fun.decl.ty) {
+        match (symbol.is_defined, symbol.ty == fun.decl.ty) {
             (true, false) => {
                 self.log_err(fun.decl.id.ctx.clone(), SemanticError::DuplicateDef);
                 self.log_err(fun.decl.id.ctx.clone(), SemanticError::TypeMismatch);
@@ -663,7 +663,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         for (arg, param) in call_expr.args.into_iter().zip(params) {
             let ctx = arg.ctx.clone();
             let typed_arg = self.expr(*arg);
-            if !typed_arg.ty.eq_or_poison(&param) {
+            if !typed_arg.ty.eq_or_poison(param) {
                 self.log_err(ctx, SemanticError::TypeMismatch);
             }
             args.push(typed_arg);

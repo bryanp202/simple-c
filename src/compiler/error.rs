@@ -185,7 +185,7 @@ impl Display for SyntaxError {
             Self::UnclosedDelimiter => "unclosed delimiter",
             Self::UnknownSymbol => "unknown symbol",
             Self::UnnamedParamsWithFunctionBody => {
-                "function declarations with unnamed parameters cannot have a function body"
+                "function declarations with unnamed parameters or in local scope cannot have a function body"
             }
             Self::UnterminatedBlockComment => "unterminated block comment",
         };

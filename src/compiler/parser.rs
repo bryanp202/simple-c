@@ -269,7 +269,6 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let decl = FunctionDecl {
             ty,
             id,
-            ret,
             param_names,
         };
 
@@ -302,7 +301,6 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let decl = FunctionDecl {
             ty,
             id,
-            ret,
             param_names,
         };
 

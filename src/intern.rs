@@ -14,7 +14,7 @@ pub struct Interned<'a, T: ?Sized + Eq + Hash>(&'a T);
 impl<T: ?Sized + Eq + Hash> Deref for Interned<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        self.0
     }
 }
 

@@ -28,7 +28,6 @@ pub struct GlobalVar<'src> {
 pub struct FunctionDecl<'src, 'a> {
     pub(crate) ty: Interned<'a, Ty<'src, 'a>>,
     pub(crate) id: Identifier<'src>,
-    pub(crate) ret: Interned<'a, Ty<'src, 'a>>,
     pub(crate) param_names: Vec<Identifier<'src>>,
 }
 

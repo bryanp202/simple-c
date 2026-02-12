@@ -95,12 +95,6 @@ impl<K: PartialEq + Eq, V> ScopeStack<K, V> {
         self.stack.push((key, item));
     }
 
-    pub fn in_scope(&self, key: &K) -> bool {
-        self.stack[self.scope_bottom..]
-            .iter()
-            .any(|(k, _)| k == key)
-    }
-
     pub fn get(&self, key: &K) -> Option<&V> {
         self.stack
             .iter()
