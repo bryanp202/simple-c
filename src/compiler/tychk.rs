@@ -652,7 +652,11 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         let ty = operand.ty;
 
         let Ty::Function { ret, params } = &*ty else {
-            return self.error(operand_ctx, SemanticError::ExpectedFunctionType);
+            return if let Ty::Poisoned = &*ty {
+                TypedExpr { expr: operand.expr, ty: self.poisoned_ty }
+            } else {
+                self.error(operand_ctx, SemanticError::ExpectedFunctionType)
+            };
         };
 
         let mut args = Vec::with_capacity_in(call_expr.args.len(), self.ast_arena);

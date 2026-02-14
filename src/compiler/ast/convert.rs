@@ -63,9 +63,9 @@ impl<'src, 'a> Converter {
     }
 
     #[inline]
-    fn reset_for_fn(&mut self, local_count: usize) {
+    fn reset_for_fn(&mut self, param_count: usize, local_count: usize) {
         self.temp_count = local_count;
-        self.curr_local = 0;
+        self.curr_local = param_count;
     }
 
     #[inline]
@@ -115,7 +115,7 @@ impl<'src, 'a> Converter {
             param_count,
             local_count,
         } = fun;
-        self.reset_for_fn(local_count);
+        self.reset_for_fn(param_count, local_count);
         let mut insts = Vec::new();
 
         for stmt in body {

@@ -94,7 +94,7 @@ impl<'src> Lexer<'src> {
 
             // Special
             c if c.is_ascii_digit() => self.number(),
-            c if c.is_alphabetic() => self.identifier(c),
+            c if is_valid_id_char(c) => self.identifier(c),
             _ => TokenTy::Err(SyntaxError::UnknownSymbol),
         };
 
@@ -241,7 +241,7 @@ impl Lexer<'_> {
             'w' => return self.check_keyword(TokenTy::While, "hile"),
             _ => {}
         }
-        self.eat_while(char::is_alphanumeric);
+        self.eat_while(is_valid_id_char);
         TokenTy::Identifier
     }
 
@@ -257,4 +257,8 @@ impl Lexer<'_> {
             TokenTy::Identifier
         }
     }
+}
+
+fn is_valid_id_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }

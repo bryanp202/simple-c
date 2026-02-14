@@ -61,7 +61,9 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     pub fn parse(mut self, src_path: PathBuf) -> Result<Program<'src, 'a>, CompileError> {
         self.advance_unchecked();
         while !self.at_end() {
-            self.item();
+            if let Some(item) = self.item() {
+                self.items.push(item);
+            }
         }
 
         if self.errors.is_empty() {
@@ -157,6 +159,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
                     | TokenTy::If
                     | TokenTy::Else
                     | TokenTy::Return
+                    | TokenTy::Comma
             ) {
                 break;
             }
@@ -252,9 +255,13 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         Identifier { name, ctx }
     }
 
-    fn item(&mut self) {
-        let item = self.function();
-        self.items.push(item);
+    fn item(&mut self) -> Option<Item<'src, 'a>> {
+        if let TokenTy::Typedef = self.peek() {
+            self.typedef();
+            return None;
+        }
+
+        Some(self.function())
     }
 
     fn function(&mut self) -> Item<'src, 'a> {
@@ -364,6 +371,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         let ty = self.parse_type();
         let id = self.parse_identifier();
         self.types.push(id.name, ty);
+        self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
     }
 
     fn var_declaration(&mut self) -> Stmt<'src, 'a> {
