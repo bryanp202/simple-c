@@ -232,8 +232,9 @@ fn generate_tacky<'src>(
 }
 
 pub fn pretty_print(item: impl Display, name: &str, src_path: &Path) {
-    let mut buf = BufWriter::new(std::io::stderr());
-    write!(&mut buf, "{}:\n{item}", src_path.display()).unwrap_or_else(|err| {
+    let lock = std::io::stderr().lock();
+    let mut writer = BufWriter::new(lock);
+    write!(&mut writer, "{}:\n{item}", src_path.display()).unwrap_or_else(|err| {
         eprintln!("{err}: failed to print {name} for: {}", src_path.display());
     });
 }
