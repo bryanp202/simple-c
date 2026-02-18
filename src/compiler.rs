@@ -188,7 +188,7 @@ fn generate_unit(
     // Convert into x86_64 asm IR
     let asm_program = AsmConverter::new().convert(tacky_program);
     if compile_flags.show_pretty_asm {
-        pretty_print(&asm_program, "asm", &src_path);
+        pretty_print(&asm_program, &src_path);
     }
     // Output x86_64 asm to file
     asm_program
@@ -213,7 +213,7 @@ fn generate_tacky<'src>(
     let ast_tree = Parser::new(src, id_interner, &mut ty_interner, &ast_arena, types)
         .parse(src_path.to_path_buf())?;
     if compile_flags.show_pretty_ast {
-        pretty_print(&ast_tree, "ast", src_path);
+        pretty_print(&ast_tree, src_path);
     }
 
     // Semantic pass
@@ -226,15 +226,13 @@ fn generate_tacky<'src>(
     // Convert into a three address code IR
     let tacky_program = ast::Converter::new().convert(checked_ast_tree);
     if compile_flags.show_pretty_tacky {
-        pretty_print(&tacky_program, "tacky", src_path);
+        pretty_print(&tacky_program, src_path);
     }
     Ok(tacky_program)
 }
 
-pub fn pretty_print(item: impl Display, name: &str, src_path: &Path) {
+pub fn pretty_print(item: impl Display, src_path: &Path) {
     let lock = std::io::stderr().lock();
     let mut writer = BufWriter::new(lock);
-    write!(&mut writer, "{}:\n{item}", src_path.display()).unwrap_or_else(|err| {
-        eprintln!("{err}: failed to print {name} for: {}", src_path.display());
-    });
+    write!(&mut writer, "\x1b[1m\x1b[36m{}:\x1b[0m\n{item}", src_path.display()).expect("failed to write to stderr");
 }
