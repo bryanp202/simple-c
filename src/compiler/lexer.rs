@@ -225,7 +225,11 @@ impl Lexer<'_> {
                 'o' => return self.check_keyword(TokenTy::Do, "o"),
                 _ => {}
             },
-            'e' => return self.check_keyword(TokenTy::Else, "lse"),
+            'e' => match self.peek() {
+                'l' => return self.check_keyword(TokenTy::Else, "lse"),
+                'x' => return self.check_keyword(TokenTy::Extern, "xtern"),
+                _ => {}
+            }
             'f' => return self.check_keyword(TokenTy::For, "or"),
             'g' => return self.check_keyword(TokenTy::Goto, "oto"),
             'i' => match self.peek() {
@@ -235,7 +239,11 @@ impl Lexer<'_> {
             },
 
             'r' => return self.check_keyword(TokenTy::Return, "eturn"),
-            's' => return self.check_keyword(TokenTy::Switch, "witch"),
+            's' => match self.peek() {
+                't' => return self.check_keyword(TokenTy::Static, "tatic"),
+                'w' => return self.check_keyword(TokenTy::Switch, "witch"),
+                _ => {}
+            }
             't' => return self.check_keyword(TokenTy::Typedef, "ypedef"),
             'v' => return self.check_keyword(TokenTy::Void, "oid"),
             'w' => return self.check_keyword(TokenTy::While, "hile"),
