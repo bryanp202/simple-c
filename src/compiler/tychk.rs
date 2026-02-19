@@ -199,7 +199,9 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 
     fn declare_id_global(&mut self, id: Identifier<'src>, id_info: IdInfo<'src, 'a>) {
-        if self.id_map.get_in_scope(&id.name).is_none() {
+        if let Some(prev_decl) = self.id_map.get_in_scope(&id.name) && prev_decl.scope != id_info.scope {
+            self.log_err(id.ctx, SemanticError::DeclWithDifLinkage);
+        } else {
             self.id_map.push(id.name, id_info);
         }
     }
@@ -307,6 +309,9 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             Declaration::Fn(fun) => self.function(fun),
             Declaration::Var(var) => {
                 if var.specifier_flags.contains(SpecifierFlags::Extern) {
+                    if var.init.is_some() {
+                        self.log_err(var.id.ctx.clone(), SemanticError::ExternDeclInFnBody);
+                    }
                     self.global(var);
                 } else if var.specifier_flags.contains(SpecifierFlags::Static) {
                     self.local_static_declaration(var);
@@ -321,7 +326,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     fn global(&mut self, global: VarDecl<'src, 'a, Alloc<'a>>) {
         let linkage = self.declare_symbol(global.id.clone(), global.specifier_flags, global.ty);
 
-        let scope = if global.specifier_flags.contains(SpecifierFlags::Static) {
+        let scope = if matches!(linkage, Linkage::None) {
             ScopeTy::Internal
         } else {
             ScopeTy::External
