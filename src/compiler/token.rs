@@ -119,6 +119,10 @@ impl Precedence {
 }
 
 impl TokenTy {
+    pub const fn is_specifier(self) -> bool {
+        matches!(self, TokenTy::Typedef | TokenTy::Extern | TokenTy::Static)
+    }
+
     pub const fn anyfix_precedence(self) -> Precedence {
         match self {
             TokenTy::Dot

@@ -15,7 +15,14 @@ impl Display for super::Program<'_> {
 
 impl Display for super::GlobalVar<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "    global {}", self.name)
+        write!(f, "    global {}", self.name)?;
+        if let Some(generation) = self.generation {
+            write!(f, "{generation}")?;
+        }
+        if let Some(def) = self.def {
+            write!(f, " <- {def}")?;
+        }
+        write!(f, ",")
     }
 }
 
@@ -69,7 +76,8 @@ impl Display for super::Val<'_> {
         match self {
             Self::Const(imm) => write!(f, "${imm}"),
             Self::Temp(id) => write!(f, ".tmp{id}"),
-            Self::GlobalVar(id) => write!(f, "{id}"),
+            Self::Fn(id) | Self::GlobalVar(id) => write!(f, "{id}"),
+            Self::LocalStaticLoad(id) => write!(f, "ls{id}"),
         }
     }
 }

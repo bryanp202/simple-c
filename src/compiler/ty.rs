@@ -1,11 +1,9 @@
 use std::fmt::Display;
 
-use crate::intern::{Interned, InternedArena, Interner};
+use crate::intern::{Interned, InternedArena};
 
 pub type TyInterner<'s, 'a> = InternedArena<'a, 'static, Ty<'s, 'a>>;
 pub type TyStack<'s, 'a> = ScopeStack<Interned<'s, str>, Interned<'a, Ty<'s, 'a>>>;
-
-const BUILT_IN_TYPES: [(&str, Ty<'static, 'static>); 2] = [("int", Ty::Int), ("", Ty::Poisoned)];
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum Ty<'src, 'a> {
@@ -50,19 +48,6 @@ impl<'src, 'a> Ty<'src, 'a> {
             _ => self == other,
         }
     }
-}
-
-pub fn built_in_types<'src, 'a>(
-    id_interner: &mut Interner<'src, str>,
-    ty_arena: &mut TyInterner<'src, 'a>,
-) -> TyStack<'src, 'a> {
-    let mut types = TyStack::new();
-    for (name, ty) in BUILT_IN_TYPES {
-        let interned_name = id_interner.intern(name);
-        let interned_ty = ty_arena.intern(ty);
-        types.push(interned_name, interned_ty);
-    }
-    types
 }
 
 pub struct ScopeStack<K: PartialEq + Eq, V> {

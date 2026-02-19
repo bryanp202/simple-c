@@ -1,3 +1,4 @@
+use bitflags::bitflags;
 use std::alloc::{Allocator, Global};
 
 use crate::{
@@ -11,31 +12,45 @@ mod convert;
 mod pretty;
 pub mod typed;
 
-pub enum Item<'src, 'a, A: Allocator = Global> {
-    FnDecl(FunctionDecl<'src, 'a>),
-    FnDef(FunctionDef<'src, 'a, A>),
-    Var(GlobalVar<'src>),
-}
-
 pub struct Program<'src, 'a, A: Allocator = Global> {
-    pub(crate) items: Vec<Item<'src, 'a, A>>,
+    pub(crate) items: Vec<Declaration<'src, 'a, A>>,
 }
 
-pub struct GlobalVar<'src> {
-    pub(crate) id: Identifier<'src>,
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct SpecifierFlags: u8 {
+        const Defined   = 0b0000_0001;
+        const Extern    = 0b0000_0010;
+        const Static    = 0b0000_0100;
+    }
 }
 
-pub struct FunctionDecl<'src, 'a> {
+pub struct Specifiers<'src, 'a> {
     pub(crate) ty: Interned<'a, Ty<'src, 'a>>,
+    pub(crate) flags: SpecifierFlags,
+}
+
+pub enum Declaration<'src, 'a, A: Allocator = Global> {
+    Fn(FunctionDecl<'src, 'a, A>),
+    Var(VarDecl<'src, 'a, A>),
+}
+
+pub struct VarDecl<'src, 'a, A: Allocator = Global> {
+    pub(crate) specifier_flags: SpecifierFlags,
     pub(crate) id: Identifier<'src>,
-    pub(crate) param_names: Vec<Identifier<'src>>,
+    pub(crate) ty: Interned<'a, Ty<'src, 'a>>,
+    pub(crate) init: Option<Expr<'src, A>>,
 }
 
-pub struct FunctionDef<'src, 'a, A: Allocator = Global> {
-    pub(crate) decl: FunctionDecl<'src, 'a>,
-    pub(crate) body: Vec<Stmt<'src, 'a, A>>,
+pub struct FunctionDecl<'src, 'a, A: Allocator = Global> {
+    pub(crate) specifier_flags: SpecifierFlags,
+    pub(crate) id: Identifier<'src>,
+    pub(crate) ty: Interned<'a, Ty<'src, 'a>>,
+    pub(crate) param_names: Vec<Option<Identifier<'src>>>,
+    pub(crate) body: Option<Vec<Stmt<'src, 'a, A>>>,
 }
 
+#[derive(Clone)]
 pub struct Identifier<'src> {
     pub(crate) name: Interned<'src, str>,
     pub(crate) ctx: Context,
@@ -57,15 +72,10 @@ pub enum Stmt<'src, 'a, A: Allocator = Global> {
         Box<Stmt<'src, 'a, A>, A>,
     ),
     Continue(Context),
-    Decl(
-        Identifier<'src>,
-        Interned<'a, Ty<'src, 'a>>,
-        Option<Box<Expr<'src, A>, A>>,
-    ),
+    Decl(Box<Declaration<'src, 'a, A>, A>),
     Do(Box<Stmt<'src, 'a, A>, A>, Box<Expr<'src, A>, A>),
     Expr(Box<Expr<'src, A>, A>),
     For(Box<ForStmt<'src, 'a, A>, A>),
-    FunctionDecl(Box<FunctionDecl<'src, 'a>, A>),
     Goto(Identifier<'src>),
     If(
         Box<Expr<'src, A>, A>,

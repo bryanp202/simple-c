@@ -1,5 +1,5 @@
 use crate::{
-    compiler::asm::{self, CompareOp, Label, Operand, Reg},
+    compiler::asm::{self, CompareOp, Label, Linkage, Operand, Reg},
     intern::Interned,
 };
 
@@ -19,12 +19,16 @@ pub struct Program<'src> {
 }
 
 pub struct GlobalVar<'src> {
+    pub(crate) linkage: Linkage,
     pub(crate) name: Interned<'src, str>,
+    pub(crate) generation: Option<u32>,
+    pub(crate) def: Option<i32>,
 }
 
 pub struct Function<'src> {
+    pub(crate) linkage: Linkage,
     pub(crate) name: Interned<'src, str>,
-    pub(crate) param_count: usize,
+    pub(crate) param_count: u32,
     pub(crate) insts: Vec<Inst<'src>>,
 }
 
@@ -60,8 +64,10 @@ pub enum Inst<'src> {
 #[derive(Clone, Copy)]
 pub enum Val<'src> {
     Const(i32),
+    Fn(Interned<'src, str>),
     GlobalVar(Interned<'src, str>),
-    Temp(usize),
+    LocalStaticLoad(u32),
+    Temp(u32),
 }
 
 #[derive(Clone, Copy)]
@@ -127,7 +133,8 @@ impl<'src> AsmConverter {
         self.registers.clear();
     }
 
-    fn reserve_or_get(&mut self, pseudo_id: usize, size: isize, align: isize) -> isize {
+    fn reserve_or_get(&mut self, pseudo_id: u32, size: isize, align: isize) -> isize {
+        let pseudo_id = pseudo_id as usize;
         if let Some(&Some(pos)) = self.registers.get(pseudo_id) {
             return pos;
         }
@@ -162,34 +169,38 @@ impl<'src> AsmConverter {
     }
 
     fn convert_global(&mut self, global: GlobalVar<'src>) -> asm::GlobalVar<'src> {
-        let GlobalVar { name } = global;
-        asm::GlobalVar { name }
+        asm::GlobalVar {
+            linkage: global.linkage,
+            name: global.name,
+            generation: global.generation,
+            def: global.def,
+        }
     }
 
     fn convert_fun(&mut self, fun: Function<'src>) -> asm::Function<'src> {
-        let Function {
-            name,
-            param_count,
-            insts,
-        } = fun;
         let mut asm_insts = Vec::new();
 
         // Move params to stack
-        for (param, reg) in (0..param_count).zip(CALL_REGS) {
+        for (param, reg) in (0..fun.param_count).zip(CALL_REGS) {
             asm_insts.push(asm::Inst::Mov(reg, Operand::Psuedo(param)));
         }
         // Stack based arguments
-        for param in CALL_REGS.len()..param_count {
+        for param in CALL_REGS
+            .len()
+            .try_into()
+            .expect("CALL_REGS len shoulb be under u32::MAX")..fun.param_count
+        {
             let src = Operand::Stack(param as isize * 8 + 16);
             asm_insts.push(asm::Inst::Mov(src, Operand::Psuedo(param)));
         }
 
-        for inst in insts {
+        for inst in fun.insts {
             self.convert_inst(inst, &mut asm_insts);
         }
 
         asm::Function {
-            name,
+            linkage: fun.linkage,
+            name: fun.name,
             insts: asm_insts,
         }
     }
@@ -371,20 +382,23 @@ impl<'src> AsmConverter {
     fn convert_val(val: Val) -> asm::Operand {
         match val {
             Val::Const(imm) => asm::Operand::Imm(imm),
+            Val::Fn(name) => asm::Operand::Fn(name),
             Val::Temp(id) => asm::Operand::Psuedo(id),
-            Val::GlobalVar(name) => asm::Operand::GlobalVar(name),
+            Val::GlobalVar(name) => asm::Operand::Data(name),
+            Val::LocalStaticLoad(id) => asm::Operand::LocalData(id),
         }
     }
 }
 
 impl<'src> AsmConverter {
     fn fill_registers(&mut self, program: asm::Program<'src>) -> asm::Program<'src> {
-        let asm::Program { globals, functions } = program;
-        let globals = globals
+        let globals = program
+            .globals
             .into_iter()
             .map(|global| self.fill_global(global))
             .collect();
-        let functions = functions
+        let functions = program
+            .functions
             .into_iter()
             .map(|fun| self.fill_function(fun))
             .collect();
@@ -398,10 +412,14 @@ impl<'src> AsmConverter {
 
     fn fill_function(&mut self, fun: asm::Function<'src>) -> asm::Function<'src> {
         self.reset_for_fn();
-        let asm::Function { name, insts } = fun;
-        let filled_insts = insts.into_iter().map(|inst| self.fill_inst(inst)).collect();
+        let filled_insts = fun
+            .insts
+            .into_iter()
+            .map(|inst| self.fill_inst(inst))
+            .collect();
         asm::Function {
-            name,
+            linkage: fun.linkage,
+            name: fun.name,
             insts: filled_insts,
         }
     }
@@ -438,37 +456,43 @@ impl<'src> AsmConverter {
     fn fill_operand(&mut self, operand: Operand<'src>) -> Operand<'src> {
         match operand {
             Operand::Psuedo(num) => Operand::Stack(self.reserve_or_get(num, 4, 4)),
-            Operand::Imm(_) | Operand::Reg(_) | Operand::Stack(_) | Operand::GlobalVar(_) => {
-                operand
-            }
+            Operand::Imm(_)
+            | Operand::Reg(_)
+            | Operand::Stack(_)
+            | Operand::Data(_)
+            | Operand::LocalData(_)
+            | Operand::Fn(_) => operand,
         }
     }
 }
 
 impl<'src> AsmConverter {
     fn fix(&mut self, program: asm::Program<'src>) -> asm::Program<'src> {
-        let asm::Program { globals, functions } = program;
-        let functions = functions
+        let functions = program
+            .functions
             .into_iter()
             .map(|fun| self.fix_function(fun))
             .collect();
 
-        asm::Program { functions, globals }
+        asm::Program {
+            functions,
+            globals: program.globals,
+        }
     }
 
     fn fix_function(&self, fun: asm::Function<'src>) -> asm::Function<'src> {
-        let asm::Function { name, insts } = fun;
-        let mut fixed_insts = Vec::with_capacity(insts.capacity());
+        let mut fixed_insts = Vec::with_capacity(fun.insts.capacity());
         fixed_insts.push(asm::Inst::AllocateStack(
             with_align(self.stack, 16).unsigned_abs(),
         ));
 
-        for inst in insts {
+        for inst in fun.insts {
             Self::fix_inst(inst, &mut fixed_insts);
         }
 
         asm::Function {
-            name,
+            linkage: fun.linkage,
+            name: fun.name,
             insts: fixed_insts,
         }
     }
@@ -571,5 +595,11 @@ impl<'src> AsmConverter {
 }
 
 fn is_mem_to_mem(a: Operand, b: Operand) -> bool {
-    matches!(a, Operand::Stack(_)) && matches!(b, Operand::Stack(_))
+    matches!(
+        a,
+        Operand::Stack(_) | Operand::Data(_) | Operand::LocalData(_)
+    ) && matches!(
+        b,
+        Operand::Stack(_) | Operand::Data(_) | Operand::LocalData(_)
+    )
 }

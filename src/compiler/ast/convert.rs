@@ -16,9 +16,9 @@ type Expr<'s, 'a> = ast::typed::Expr<'s, 'a, Alloc<'a>>;
 type ExprTy<'s, 'a> = ast::typed::ExprTy<'s, 'a, Alloc<'a>>;
 
 pub struct Converter {
-    temp_count: usize,
-    label_count: usize,
-    curr_local: usize,
+    temp_count: u32,
+    label_count: u32,
+    curr_local: u32,
     break_label: Label,
     continue_label: Label,
 }
@@ -35,8 +35,8 @@ impl Converter {
             temp_count: 0,
             label_count: 0,
             curr_local: 0,
-            break_label: Label(usize::MAX),
-            continue_label: Label(usize::MAX),
+            break_label: Label(u32::MAX),
+            continue_label: Label(u32::MAX),
         }
     }
 
@@ -58,12 +58,12 @@ impl Converter {
 
 impl<'src, 'a> Converter {
     #[inline]
-    fn reset_for_program(&mut self, labels: usize) {
+    fn reset_for_program(&mut self, labels: u32) {
         self.label_count = labels;
     }
 
     #[inline]
-    fn reset_for_fn(&mut self, param_count: usize, local_count: usize) {
+    fn reset_for_fn(&mut self, param_count: u32, local_count: u32) {
         self.temp_count = local_count;
         self.curr_local = param_count;
     }
@@ -104,29 +104,28 @@ impl<'src, 'a> Converter {
     }
 
     fn global(&self, global: GlobalVar<'src>) -> tacky::GlobalVar<'src> {
-        let GlobalVar { name } = global;
-        tacky::GlobalVar { name }
+        tacky::GlobalVar {
+            linkage: global.linkage,
+            name: global.name,
+            generation: global.generation,
+            def: global.def,
+        }
     }
 
     fn function(&mut self, fun: Function<'src, 'a>) -> tacky::Function<'src> {
-        let Function {
-            name,
-            body,
-            param_count,
-            local_count,
-        } = fun;
-        self.reset_for_fn(param_count, local_count);
+        self.reset_for_fn(fun.param_count, fun.local_count);
         let mut insts = Vec::new();
 
-        for stmt in body {
+        for stmt in fun.body {
             self.stmt(stmt, &mut insts);
         }
         // Add catch all null(0) return
         insts.push(tacky::Inst::Ret(tacky::Val::Const(0)));
 
         tacky::Function {
-            name,
-            param_count,
+            linkage: fun.linkage,
+            name: fun.name,
+            param_count: fun.param_count,
             insts,
         }
     }
@@ -276,7 +275,9 @@ impl<'src, 'a> Converter {
             ExprTy::Unary(op, expr) => self.unary(op, *expr, insts),
             ExprTy::DecInc(op, expr) => self.dec_inc(op, *expr, insts),
             ExprTy::Call(call_expr) => self.call(*call_expr, insts),
-            ExprTy::Global(name) => tacky::Val::GlobalVar(name),
+            ExprTy::FnLoad(name) => tacky::Val::Fn(name),
+            ExprTy::GlobalLoad(name) => tacky::Val::GlobalVar(name),
+            ExprTy::LocalStaticLoad(id) => tacky::Val::LocalStaticLoad(id),
             ExprTy::Local(id) => tacky::Val::Temp(id),
             ExprTy::Constant(imm) => tacky::Val::Const(imm),
             ExprTy::Poisoned => unreachable!("Attempted to convert poison ast node"),

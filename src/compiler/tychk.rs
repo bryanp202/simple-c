@@ -1,12 +1,12 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use crate::{
     arena::Arena,
     compiler::{
-        asm::Label,
+        asm::{Label, Linkage},
         ast::{
-            self, AssignOp, BinaryOp, FunctionDecl, GlobalVar, Identifier, Item, UnaryOp,
-            typed::{ForStmt, SwitchCase, SwitchStmt},
+            self, AssignOp, BinaryOp, FunctionDecl, Identifier, SpecifierFlags, UnaryOp, VarDecl,
+            typed::{ForStmt, SwitchCase, SwitchStmt, SymbolTable},
         },
         error::{CompileError, Context, SemanticError, SemanticErrorWithCtx},
         ty::{ScopeStack, Ty, TyInterner},
@@ -16,8 +16,8 @@ use crate::{
 
 type Alloc<'a> = &'a Arena<'static>;
 type Program<'s, 'a> = ast::Program<'s, 'a, Alloc<'a>>;
-type FunctionDef<'s, 'a> = ast::FunctionDef<'s, 'a, Alloc<'a>>;
 type Stmt<'s, 'a> = ast::Stmt<'s, 'a, Alloc<'a>>;
+type Declaration<'s, 'a> = ast::Declaration<'s, 'a, Alloc<'a>>;
 type Expr<'s, 'a> = ast::Expr<'s, Alloc<'a>>;
 type ExprTy<'s, 'a> = ast::ExprTy<'s, Alloc<'a>>;
 
@@ -29,10 +29,6 @@ type TypedExpr<'s, 'a> = ast::typed::Expr<'s, 'a, Alloc<'a>>;
 type TypedExprTy<'s, 'a> = ast::typed::ExprTy<'s, 'a, Alloc<'a>>;
 
 type SwitchData<'s, 'a> = (Vec<SwitchCase>, Option<Label>);
-struct SymbolData<'s, 'a> {
-    is_defined: bool,
-    ty: Interned<'a, Ty<'s, 'a>>,
-}
 
 struct GotoLabel<'src> {
     id: Identifier<'src>,
@@ -49,7 +45,8 @@ struct IdInfo<'src, 'a> {
 enum ScopeTy {
     External,
     Internal,
-    Local(usize), // Local # based on order of declaration
+    InternalLocal(u32),
+    Local(u32), // Local # based on order of declaration
 }
 
 pub struct TyChecker<'src, 'a> {
@@ -58,12 +55,13 @@ pub struct TyChecker<'src, 'a> {
     errors: Vec<SemanticErrorWithCtx>,
     // Program data
     id_map: ScopeStack<Interned<'src, str>, IdInfo<'src, 'a>>,
-    symbol_table: HashMap<Interned<'src, str>, SymbolData<'src, 'a>>,
-    label_count: usize,
+    symbol_table: SymbolTable<'src, 'a, Alloc<'a>>,
+    label_count: u32,
     // Function data
     goto_labels: Vec<GotoLabel<'src>>,
-    local_count: usize,
-    loop_depth: usize,
+    local_count: u32,
+    local_static_count: u32,
+    loop_depth: u32,
     switch_cases: Option<SwitchData<'src, 'a>>,
 }
 
@@ -74,10 +72,11 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             ast_arena,
             errors: Vec::new(),
             id_map: ScopeStack::new(),
-            symbol_table: HashMap::new(),
+            symbol_table: SymbolTable::new(),
             label_count: 0,
             goto_labels: Vec::new(),
             local_count: 0,
+            local_static_count: 0,
             loop_depth: 0,
             switch_cases: None,
         }
@@ -89,17 +88,14 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         src_path: PathBuf,
         ast_program: Program<'src, 'a>,
     ) -> Result<TypedProgram<'src, 'a>, CompileError> {
-        let mut globals = Vec::new();
-        let mut functions = Vec::new();
-
         for item in ast_program.items {
             match item {
-                Item::FnDecl(decl) => self.function_decl(decl),
-                Item::FnDef(def) => functions.push(self.function_def(def)),
-                Item::Var(global) => globals.push(self.global(global)),
+                Declaration::Fn(fun) => self.function(fun),
+                Declaration::Var(var) => self.global(var),
             }
         }
 
+        let (functions, globals) = self.symbol_table.into_parts();
         if self.errors.is_empty() {
             Ok(TypedProgram {
                 labels: self.label_count,
@@ -121,10 +117,17 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     }
 
     #[inline]
-    fn new_local(&mut self) -> usize {
+    fn new_local(&mut self) -> u32 {
         let local = self.local_count;
         self.local_count += 1;
         local
+    }
+
+    #[inline]
+    fn new_local_static(&mut self) -> u32 {
+        let local_static = self.local_static_count;
+        self.local_static_count += 1;
+        local_static
     }
 
     #[inline]
@@ -178,6 +181,27 @@ impl<'src, 'a> TyChecker<'src, 'a> {
     #[inline]
     fn can_continue(&mut self) -> bool {
         self.loop_depth > 0
+    }
+
+    fn declare_symbol(
+        &mut self,
+        id: Identifier<'src>,
+        specifier_flags: SpecifierFlags,
+        ty: Interned<'a, Ty<'src, 'a>>,
+    ) -> Linkage {
+        match self.symbol_table.decl(id.name, specifier_flags, ty) {
+            Ok(linkage) => linkage,
+            Err(err) => {
+                self.log_err(id.ctx, err);
+                Linkage::None
+            }
+        }
+    }
+
+    fn declare_id_global(&mut self, id: Identifier<'src>, id_info: IdInfo<'src, 'a>) {
+        if self.id_map.get_in_scope(&id.name).is_none() {
+            self.id_map.push(id.name, id_info);
+        }
     }
 
     fn declare_id(&mut self, id: Identifier<'src>, id_info: IdInfo<'src, 'a>) {
@@ -275,100 +299,167 @@ impl<'src, 'a> TyChecker<'src, 'a> {
         }
     }
 
-    fn global(&mut self, global: GlobalVar<'src>) -> TypedGlobalVar<'src> {
-        TypedGlobalVar {
-            name: global.id.name,
-        }
-    }
-
-    fn function_decl(&mut self, decl: FunctionDecl<'src, 'a>) {
-        let symbol = self.symbol_table.entry(decl.id.name).or_insert(SymbolData {
-            is_defined: false,
-            ty: decl.ty,
-        });
-
-        if symbol.ty != decl.ty {
-            self.log_err(decl.id.ctx.clone(), SemanticError::TypeMismatch);
-        } else {
-            let id_info = IdInfo {
-                ty: decl.ty,
-                scope: ScopeTy::External,
-            };
-            self.declare_id(decl.id, id_info);
-        }
-
-        let old_scope = self.id_map.enter_scope();
-        for param in decl.param_names {
-            self.declare_id(
-                param,
-                IdInfo {
-                    ty: self.poisoned_ty,
-                    scope: ScopeTy::Local(0),
-                },
-            );
-        }
-        self.id_map.exit_scope(old_scope);
-    }
-
-    fn function_def(&mut self, fun: FunctionDef<'src, 'a>) -> TypedFunction<'src, 'a> {
-        self.reset_for_fn();
-
-        let symbol = self
-            .symbol_table
-            .entry(fun.decl.id.name)
-            .or_insert(SymbolData {
-                is_defined: false,
-                ty: fun.decl.ty,
-            });
-        match (symbol.is_defined, symbol.ty == fun.decl.ty) {
-            (true, false) => {
-                self.log_err(fun.decl.id.ctx.clone(), SemanticError::DuplicateDef);
-                self.log_err(fun.decl.id.ctx.clone(), SemanticError::TypeMismatch);
+    fn declaration(&mut self, decl: Declaration<'src, 'a>) -> TypedStmt<'src, 'a> {
+        match decl {
+            Declaration::Fn(fun) if fun.specifier_flags.contains(SpecifierFlags::Static) => {
+                self.log_err(fun.id.ctx, SemanticError::StaticFnDeclInBody)
             }
-            (true, _) => self.log_err(fun.decl.id.ctx.clone(), SemanticError::DuplicateDef),
-            (_, false) => self.log_err(fun.decl.id.ctx.clone(), SemanticError::TypeMismatch),
-            _ => symbol.is_defined = true,
+            Declaration::Fn(fun) => self.function(fun),
+            Declaration::Var(var) => {
+                if var.specifier_flags.contains(SpecifierFlags::Extern) {
+                    self.global(var);
+                } else if var.specifier_flags.contains(SpecifierFlags::Static) {
+                    self.local_static_declaration(var);
+                } else {
+                    return self.local_declaration(var.id, var.ty, var.init);
+                }
+            }
         }
+        TypedStmt::Nil
+    }
 
-        let old_scope = self.id_map.enter_scope();
-        let Ty::Function { params, .. } = &*fun.decl.ty else {
-            unreachable!("function decl had non-fn type")
+    fn global(&mut self, global: VarDecl<'src, 'a, Alloc<'a>>) {
+        let linkage = self.declare_symbol(global.id.clone(), global.specifier_flags, global.ty);
+
+        let scope = if global.specifier_flags.contains(SpecifierFlags::Static) {
+            ScopeTy::Internal
+        } else {
+            ScopeTy::External
         };
-        for (id, ty) in fun.decl.param_names.into_iter().zip(params) {
-            self.decl_local(id, *ty);
-        }
-        let body = fun.body.into_iter().map(|stmt| self.stmt(stmt)).collect();
-        self.id_map.exit_scope(old_scope);
 
-        let name = fun.decl.id.name;
-        self.declare_id(
-            fun.decl.id,
+        self.declare_id_global(
+            global.id.clone(),
             IdInfo {
-                ty: fun.decl.ty,
-                scope: ScopeTy::External,
+                ty: global.ty,
+                scope,
             },
         );
 
-        // Check all goto labels resolved
-        self.goto_labels
-            .drain(..)
-            .filter_map(|l| if l.declared { None } else { Some(l.id.ctx) })
-            .for_each(|ctx| {
-                self.errors.push(SemanticErrorWithCtx {
-                    ctx,
-                    err: SemanticError::UndeclaredVar,
-                });
-            });
+        let def = match global.init {
+            Some(Expr {
+                expr: ExprTy::Constant(cnst),
+                ..
+            }) => Some(cnst),
+            Some(Expr { ctx, .. }) => {
+                self.log_err(ctx, SemanticError::NonConstGlobal);
+                None
+            }
+            None => None,
+        };
 
-        TypedFunction {
-            name,
-            body,
-            param_count: params.len(),
-            local_count: self.local_count,
+        let typed_global = TypedGlobalVar {
+            linkage,
+            name: global.id.name,
+            generation: None,
+            def,
+        };
+
+        if let Some(_) = typed_global.def
+            && let Err(err) = self.symbol_table.define_global(typed_global)
+        {
+            self.log_err(global.id.ctx, err);
         }
     }
 
-    fn decl_local(&mut self, id: Identifier<'src>, ty: Interned<'a, Ty<'src, 'a>>) {
+    fn function(&mut self, fun: FunctionDecl<'src, 'a, Alloc<'a>>) {
+        let linkage = self.declare_symbol(fun.id.clone(), fun.specifier_flags, fun.ty);
+
+        let scope = if fun.specifier_flags.contains(SpecifierFlags::Static) {
+            ScopeTy::Internal
+        } else {
+            ScopeTy::External
+        };
+
+        self.declare_id(fun.id.clone(), IdInfo { ty: fun.ty, scope });
+
+        if let Some(body) = fun.body {
+            self.reset_for_fn();
+
+            let old_scope = self.id_map.enter_scope();
+            let Ty::Function { params, .. } = &*fun.ty else {
+                unreachable!("function decl had non-fn type")
+            };
+            for (id, ty) in fun.param_names.into_iter().zip(params) {
+                if let Some(id) = id {
+                    _ = self.local_declaration(id, *ty, None);
+                }
+            }
+            let body = body.into_iter().map(|stmt| self.stmt(stmt)).collect();
+            self.id_map.exit_scope(old_scope);
+
+            // Check all goto labels resolved
+            self.goto_labels
+                .drain(..)
+                .filter_map(|l| if l.declared { None } else { Some(l.id.ctx) })
+                .for_each(|ctx| {
+                    self.errors.push(SemanticErrorWithCtx {
+                        ctx,
+                        err: SemanticError::UndeclaredVar,
+                    });
+                });
+
+            let typed_function = TypedFunction {
+                linkage,
+                name: fun.id.name,
+                body,
+                param_count: params.len().try_into().expect("parameters exceed u32 max"),
+                local_count: self.local_count,
+            };
+
+            if let Err(err) = self.symbol_table.define_fun(typed_function) {
+                self.log_err(fun.id.ctx, err)
+            }
+        } else {
+            let old_scope = self.id_map.enter_scope();
+            for param in fun.param_names {
+                let Some(param) = param else {
+                    continue;
+                };
+
+                self.declare_id(
+                    param,
+                    IdInfo {
+                        ty: self.poisoned_ty,
+                        scope: ScopeTy::Local(0),
+                    },
+                );
+            }
+            self.id_map.exit_scope(old_scope);
+        }
+    }
+
+    fn local_static_declaration(&mut self, var: VarDecl<'src, 'a, Alloc<'a>>) {
+        let local_static = self.new_local_static();
+
+        let def = match var.init {
+            Some(Expr {
+                expr: ExprTy::Constant(cnst),
+                ..
+            }) => Some(cnst),
+            Some(Expr { ctx, .. }) => {
+                self.log_err(ctx, SemanticError::NonConstGlobal);
+                None
+            }
+            None => None,
+        };
+        self.symbol_table
+            .decl_local_static(var.id.name, local_static, def);
+
+        self.declare_id(
+            var.id,
+            IdInfo {
+                ty: var.ty,
+                scope: ScopeTy::InternalLocal(local_static),
+            },
+        );
+    }
+
+    fn local_declaration(
+        &mut self,
+        id: Identifier<'src>,
+        ty: Interned<'a, Ty<'src, 'a>>,
+        init: Option<Expr<'src, 'a>>,
+    ) -> TypedStmt<'src, 'a> {
         let local = self.new_local();
         self.declare_id(
             id,
@@ -377,6 +468,8 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 scope: ScopeTy::Local(local),
             },
         );
+        let init = init.map(|expr| self.expr(expr));
+        return TypedStmt::Decl(init);
     }
 
     fn stmt(&mut self, stmt: Stmt<'src, 'a>) -> TypedStmt<'src, 'a> {
@@ -409,12 +502,7 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 TypedStmt::Do(self.alloc_stmt(body), condition)
             }
             Stmt::Expr(expr) => TypedStmt::Expr(self.expr(*expr)),
-            Stmt::Decl(ident, ty, init) => {
-                self.decl_local(ident, ty);
-
-                let init = init.map(|expr| self.expr(*expr));
-                TypedStmt::Decl(init)
-            }
+            Stmt::Decl(decl) => self.declaration(*decl),
             Stmt::For(for_stmt) => {
                 self.enter_loop();
                 let old_scope = self.id_map.enter_scope();
@@ -437,10 +525,6 @@ impl<'src, 'a> TyChecker<'src, 'a> {
                 self.id_map.exit_scope(old_scope);
                 self.exit_loop();
                 TypedStmt::For(Box::new_in(for_stmt, self.ast_arena))
-            }
-            Stmt::FunctionDecl(decl) => {
-                self.function_decl(*decl);
-                TypedStmt::Nil
             }
             Stmt::Goto(id) => {
                 let label = self.get_or_make_goto_label(id);
@@ -653,7 +737,10 @@ impl<'src, 'a> TyChecker<'src, 'a> {
 
         let Ty::Function { ret, params } = &*ty else {
             return if let Ty::Poisoned = &*ty {
-                TypedExpr { expr: operand.expr, ty: self.poisoned_ty }
+                TypedExpr {
+                    expr: operand.expr,
+                    ty: self.poisoned_ty,
+                }
             } else {
                 self.error(operand_ctx, SemanticError::ExpectedFunctionType)
             };
@@ -688,8 +775,24 @@ impl<'src, 'a> TyChecker<'src, 'a> {
             Some(&IdInfo {
                 ty,
                 scope: ScopeTy::Internal | ScopeTy::External,
+            }) => {
+                if matches!(*ty, Ty::Function { .. }) {
+                    TypedExpr {
+                        expr: TypedExprTy::FnLoad(name),
+                        ty,
+                    }
+                } else {
+                    TypedExpr {
+                        expr: TypedExprTy::GlobalLoad(name),
+                        ty,
+                    }
+                }
+            }
+            Some(&IdInfo {
+                ty,
+                scope: ScopeTy::InternalLocal(id),
             }) => TypedExpr {
-                expr: TypedExprTy::Global(name),
+                expr: TypedExprTy::LocalStaticLoad(id),
                 ty,
             },
             Some(&IdInfo {

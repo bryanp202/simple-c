@@ -1,5 +1,7 @@
 use std::{alloc::Allocator, fmt::Display};
 
+use crate::compiler::ast::SpecifierFlags;
+
 const LEVEL_SPACES: usize = 4;
 
 #[derive(Clone, Copy)]
@@ -30,38 +32,48 @@ trait Pretty {
 impl<A: Allocator> Display for super::Program<'_, '_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for item in &self.items {
-            writeln!(f, "{item}")?;
+            item.pretty(f, Level::new())?;
+            writeln!(f)?;
         }
         Ok(())
     }
 }
 
-impl<A: Allocator> Display for super::Item<'_, '_, A> {
+impl Display for SpecifierFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::FnDecl(decl) => write!(f, "{decl};"),
-            Self::FnDef(def) => write!(f, "{def}"),
-            Self::Var(global) => write!(f, "{global}"),
+        if self.contains(SpecifierFlags::Extern) {
+            write!(f, "extern ")?;
         }
+        if self.contains(SpecifierFlags::Static) {
+            write!(f, "static ")?;
+        }
+
+        Ok(())
     }
 }
 
-impl Display for super::GlobalVar<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "global \"{}\";", self.id.name)
-    }
-}
+impl<A: Allocator> Pretty for super::Declaration<'_, '_, A> {
+    fn pretty(&self, f: &mut std::fmt::Formatter<'_>, level: Level) -> std::fmt::Result {
+        match self {
+            Self::Fn(fun) => {
+                write!(f, "{}{} {}", fun.specifier_flags, fun.ty, fun.id.name)?;
 
-impl Display for super::FunctionDecl<'_, '_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.ty, self.id.name)
-    }
-}
+                if let Some(body) = &fun.body {
+                    body.pretty(f, level)
+                } else {
+                    write!(f, ";")
+                }
+            }
+            Self::Var(var) => {
+                write!(f, "{}{} {}", var.specifier_flags, var.ty, var.id.name)?;
 
-impl<A: Allocator> Display for super::FunctionDef<'_, '_, A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.decl)?;
-        self.body.pretty(f, Level::new())
+                if let Some(init) = &var.init {
+                    write!(f, " = {init};")
+                } else {
+                    write!(f, ";")
+                }
+            }
+        }
     }
 }
 
@@ -107,14 +119,7 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                 stmt.pretty(f, sub_stmt_level(stmt, level))
             }
             Self::Continue(_) => write!(f, "continue;"),
-            Self::Decl(id, ty, init) => {
-                write!(f, "{ty} {}", id.name)?;
-                if let Some(init) = init {
-                    write!(f, " = {init};")
-                } else {
-                    write!(f, ";")
-                }
-            }
+            Self::Decl(decl) => decl.pretty(f, level),
             Self::Do(body, condition) => {
                 writeln!(f, "do")?;
                 body.pretty(f, sub_stmt_level(body, level))?;
@@ -141,7 +146,6 @@ impl<A: Allocator> Pretty for super::Stmt<'_, '_, A> {
                     .body
                     .pretty(f, sub_stmt_level(&for_stmt.body, level))
             }
-            Self::FunctionDecl(decl) => write!(f, "{decl};"),
             Self::Goto(id) => write!(f, "goto {};", id.name),
             Self::If(condition, then_branch, else_branch) => {
                 writeln!(f, "if ({})", condition)?;

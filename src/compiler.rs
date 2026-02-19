@@ -15,7 +15,6 @@ use crate::{
         error::{BuildError, CompileError},
         parser::Parser,
         tacky::AsmConverter,
-        ty::built_in_types,
         tychk::TyChecker,
     },
     intern::{InternedArena, Interner},
@@ -209,8 +208,7 @@ fn generate_tacky<'src>(
     let ast_arena = Arena::new();
 
     // Parse into an ast
-    let types = built_in_types(id_interner, &mut ty_interner);
-    let ast_tree = Parser::new(src, id_interner, &mut ty_interner, &ast_arena, types)
+    let ast_tree = Parser::new(src, id_interner, &mut ty_interner, &ast_arena)
         .parse(src_path.to_path_buf())?;
     if compile_flags.show_pretty_ast {
         pretty_print(&ast_tree, src_path);
@@ -234,5 +232,10 @@ fn generate_tacky<'src>(
 pub fn pretty_print(item: impl Display, src_path: &Path) {
     let lock = std::io::stderr().lock();
     let mut writer = BufWriter::new(lock);
-    write!(&mut writer, "\x1b[1m\x1b[36m{}:\x1b[0m\n{item}", src_path.display()).expect("failed to write to stderr");
+    write!(
+        &mut writer,
+        "\x1b[1m\x1b[36m{}:\x1b[0m\n{item}",
+        src_path.display()
+    )
+    .expect("failed to write to stderr");
 }

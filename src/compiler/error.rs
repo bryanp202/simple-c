@@ -157,36 +157,36 @@ pub struct ErrorWithCtx<E: Display> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SyntaxError {
+    DuplicateSpecifier,
     ExpectedColon,
     ExpectedExpr,
     ExpectedIdentifier,
     ExpectedOpenParen,
     ExpectedSemicolon,
     ExpectedWhile,
+    FunctionDefInBody,
     IntegerLiteralTooLarge,
     InvalidIntegerSuffix,
     UnclosedDelimiter,
     UnknownSymbol,
-    UnnamedParamsWithFunctionBody,
     UnterminatedBlockComment,
 }
 
 impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
+            Self::DuplicateSpecifier => "duplicate specifier",
             Self::ExpectedColon => "expected a ':' after conditional then branch",
             Self::ExpectedExpr => "expected a valid expression",
             Self::ExpectedIdentifier => "expected an identifier",
             Self::ExpectedOpenParen => "expected a '('",
             Self::ExpectedSemicolon => "expected a ';'",
             Self::ExpectedWhile => "expected 'while' after do loop body",
+            Self::FunctionDefInBody => "function definitions cannot be in function bodies",
             Self::IntegerLiteralTooLarge => "integer literal too large",
             Self::InvalidIntegerSuffix => "invalid integer suffix",
             Self::UnclosedDelimiter => "unclosed delimiter",
             Self::UnknownSymbol => "unknown symbol",
-            Self::UnnamedParamsWithFunctionBody => {
-                "function declarations with unnamed parameters or in local scope cannot have a function body"
-            }
             Self::UnterminatedBlockComment => "unterminated block comment",
         };
         let error_code = *self as usize;
@@ -196,6 +196,7 @@ impl Display for SyntaxError {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SemanticError {
+    DeclWithDifLinkage,
     DuplicateCase,
     DuplicateDecl,
     DuplicateDef,
@@ -207,6 +208,9 @@ pub enum SemanticError {
     InvalidContinue,
     InvalidLValue,
     MultipleDefaultCases,
+    NonConstGlobal,
+    StaticFnDeclInBody,
+    TooManyStorageClasses,
     TypeMismatch,
     UndeclaredVar,
 }
@@ -214,6 +218,7 @@ pub enum SemanticError {
 impl Display for SemanticError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
+            Self::DeclWithDifLinkage => "declarations of items must have matching linkage",
             Self::DuplicateCase => "duplicate switch cases",
             Self::DuplicateDecl => "duplicate declaration",
             Self::DuplicateDef => "duplicate definition",
@@ -225,6 +230,9 @@ impl Display for SemanticError {
             Self::InvalidContinue => "continue must be in loop",
             Self::InvalidLValue => "invalid lvalue",
             Self::MultipleDefaultCases => "multiple default cases defined",
+            Self::NonConstGlobal => "expected constant defintion for global variable",
+            Self::StaticFnDeclInBody => "static function decl not allowed in function bodies",
+            Self::TooManyStorageClasses => "expected at most one storage class per item",
             Self::TypeMismatch => "type mismatch",
             Self::UndeclaredVar => "use of undeclared variable",
         };

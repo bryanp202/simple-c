@@ -4,8 +4,8 @@ use crate::{
     arena::Arena,
     compiler::{
         ast::{
-            self, AssignOp, BinaryOp, CallExpr, ForStmt, FunctionDecl, FunctionDef, Identifier,
-            UnaryOp,
+            self, AssignOp, BinaryOp, CallExpr, ForStmt, FunctionDecl, Identifier, SpecifierFlags,
+            Specifiers, UnaryOp, VarDecl,
         },
         error::{CompileError, Context, SyntaxError, SyntaxErrorWithCtx},
         lexer::Lexer,
@@ -17,7 +17,7 @@ use crate::{
 
 type Alloc<'a> = &'a Arena<'static>;
 type Program<'s, 'a> = ast::Program<'s, 'a, Alloc<'a>>;
-type Item<'s, 'a> = ast::Item<'s, 'a, Alloc<'a>>;
+type Declaration<'s, 'a> = ast::Declaration<'s, 'a, Alloc<'a>>;
 type Stmt<'s, 'a> = ast::Stmt<'s, 'a, Alloc<'a>>;
 type Expr<'s, 'a> = ast::Expr<'s, Alloc<'a>>;
 type ExprTy<'s, 'a> = ast::ExprTy<'s, Alloc<'a>>;
@@ -32,7 +32,7 @@ pub struct Parser<'src, 'a, 'ty> {
     prev: Token,
     errors: Vec<SyntaxErrorWithCtx>,
     // Program data
-    items: Vec<Item<'src, 'a>>,
+    items: Vec<Declaration<'src, 'a>>,
     types: TyStack<'src, 'a>,
 }
 
@@ -42,7 +42,6 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         id_interner: &'src mut Interner<'src, str>,
         ty_interner: &'ty mut TyInterner<'src, 'a>,
         ast_arena: Alloc<'a>,
-        types: TyStack<'src, 'a>,
     ) -> Self {
         Self {
             src,
@@ -54,7 +53,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
             prev: Token::new(TokenTy::Eof, 0..0),
             errors: Vec::new(),
             items: Vec::new(),
-            types,
+            types: TyStack::new(),
         }
     }
 
@@ -110,6 +109,12 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         });
     }
 
+    /// Returns an error from the provided ctx
+    #[inline]
+    fn error_at_ctx(&mut self, err: SyntaxError, ctx: Context) {
+        self.log_err(SyntaxErrorWithCtx { ctx, err });
+    }
+
     #[inline]
     fn log_err(&mut self, err_with_ctx: SyntaxErrorWithCtx) {
         self.errors.push(err_with_ctx);
@@ -143,7 +148,7 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     fn synchronize(&mut self) {
         loop {
             // Check if start of decl
-            if self.next_is_type() {
+            if self.parse_ty_specifier().is_some() {
                 break;
             }
 
@@ -160,6 +165,8 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
                     | TokenTy::Else
                     | TokenTy::Return
                     | TokenTy::Comma
+                    | TokenTy::Extern
+                    | TokenTy::Static
             ) {
                 break;
             }
@@ -221,33 +228,6 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         }
     }
 
-    /// Checks if the next token is a type or not
-    ///
-    /// Must check if an identifier is in the types stack because of typedef
-    fn next_is_type(&mut self) -> bool {
-        match self.peek() {
-            TokenTy::Int => true,
-            TokenTy::Identifier => {
-                let id = self.intern_next();
-                self.types.get(&id).is_some()
-            }
-            _ => false,
-        }
-    }
-
-    fn parse_type(&mut self) -> Interned<'a, Ty<'src, 'a>> {
-        if !self.eat_if(TokenTy::Identifier) {
-            self.eat(TokenTy::Int, SyntaxError::UnknownSymbol);
-        }
-        let id = self.intern_prev();
-
-        self.types.get(&id).copied().unwrap_or_else(|| {
-            self.error(SyntaxError::UnknownSymbol);
-            self.synchronize();
-            self.ty_interner.intern(Ty::Poisoned)
-        })
-    }
-
     fn parse_identifier(&mut self) -> Identifier<'src> {
         self.eat(TokenTy::Identifier, SyntaxError::ExpectedIdentifier);
         let name = self.intern_prev();
@@ -255,72 +235,118 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         Identifier { name, ctx }
     }
 
-    fn item(&mut self) -> Option<Item<'src, 'a>> {
+    fn item(&mut self) -> Option<Declaration<'src, 'a>> {
         if let TokenTy::Typedef = self.peek() {
             self.typedef();
             return None;
         }
 
-        Some(self.function())
-    }
-
-    fn function(&mut self) -> Item<'src, 'a> {
-        let ret = self.parse_type();
+        let specifiers = self.specifiers();
         let id = self.parse_identifier();
 
+        if self.check(TokenTy::OpenParen) {
+            Some(self.function(specifiers, id))
+        } else {
+            Some(self.var_declaration(specifiers, id))
+        }
+    }
+
+    fn parse_type(&mut self) -> Interned<'a, Ty<'src, 'a>> {
+        if let Some(ty) = self.parse_ty_specifier() {
+            self.advance_unchecked();
+            ty
+        } else {
+            self.synchronize();
+            self.ty_interner.intern(Ty::Poisoned)
+        }
+    }
+
+    fn parse_ty_specifier(&mut self) -> Option<Interned<'a, Ty<'src, 'a>>> {
+        match self.peek() {
+            TokenTy::Identifier => {
+                let id = self.intern_next();
+                if let Some(user_ty) = self.types.get(&id) {
+                    Some(*user_ty)
+                } else {
+                    None
+                }
+            }
+            TokenTy::Int => Some(self.ty_interner.intern(Ty::Int)),
+            _ => None,
+        }
+    }
+
+    fn specifiers(&mut self) -> Specifiers<'src, 'a> {
+        let mut flags = SpecifierFlags::empty();
+        let mut ty = None;
+
+        loop {
+            match self.peek() {
+                TokenTy::Extern if flags.contains(SpecifierFlags::Extern) => {
+                    self.error_at(SyntaxError::DuplicateSpecifier)
+                }
+                TokenTy::Static if flags.contains(SpecifierFlags::Static) => {
+                    self.error_at(SyntaxError::DuplicateSpecifier)
+                }
+                TokenTy::Extern => flags.insert(SpecifierFlags::Extern),
+                TokenTy::Static => flags.insert(SpecifierFlags::Static),
+                _ => {
+                    if let Some(ty_specifier) = self.parse_ty_specifier() {
+                        if ty.is_none() {
+                            ty = Some(ty_specifier);
+                        } else {
+                            self.error_at(SyntaxError::DuplicateSpecifier);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.advance_unchecked();
+        }
+
+        let ty = ty.unwrap_or_else(|| self.ty_interner.intern(Ty::Poisoned));
+        Specifiers { ty, flags }
+    }
+
+    fn function(
+        &mut self,
+        specifiers: Specifiers<'src, 'a>,
+        id: Identifier<'src>,
+    ) -> Declaration<'src, 'a> {
         let (params, param_names) = self.parse_param_list();
-        let missing_names = params.len() != param_names.len();
-        let fn_type = Ty::Function { ret, params };
+        let fn_type = Ty::Function {
+            ret: specifiers.ty,
+            params,
+        };
         let ty = self.ty_interner.intern(fn_type);
 
-        let decl = FunctionDecl {
-            ty,
-            id,
-            param_names,
-        };
-
-        if !missing_names && self.check(TokenTy::OpenBrace) {
+        let body = if self.check(TokenTy::OpenBrace) {
             let Stmt::Block(body) = self.block() else {
                 unreachable!("block parsing returned non-block stmt");
             };
-
-            Item::FnDef(FunctionDef { decl, body })
-        } else {
-            if self.check(TokenTy::OpenBrace) {
-                self.error_at(SyntaxError::UnnamedParamsWithFunctionBody);
-                _ = self.block();
-            } else {
-                self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
-            }
-            Item::FnDecl(decl)
-        }
-    }
-
-    fn function_decl(
-        &mut self,
-        ret: Interned<'a, Ty<'src, 'a>>,
-        id: Identifier<'src>,
-    ) -> Stmt<'src, 'a> {
-        let (params, param_names) = self.parse_param_list();
-        let fn_type = Ty::Function { ret, params };
-        let ty = self.ty_interner.intern(fn_type);
-
-        let decl = FunctionDecl {
-            ty,
-            id,
-            param_names,
-        };
-
-        if self.check(TokenTy::OpenBrace) {
-            self.error_at(SyntaxError::UnnamedParamsWithFunctionBody);
-            _ = self.block();
+            Some(body)
         } else {
             self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
-        }
-        Stmt::FunctionDecl(Box::new_in(decl, self.ast_arena))
+            None
+        };
+
+        let decl = FunctionDecl {
+            specifier_flags: specifiers.flags,
+            id,
+            ty,
+            param_names,
+            body,
+        };
+        Declaration::Fn(decl)
     }
 
-    fn parse_param_list(&mut self) -> (Vec<Interned<'a, Ty<'src, 'a>>>, Vec<Identifier<'src>>) {
+    fn parse_param_list(
+        &mut self,
+    ) -> (
+        Vec<Interned<'a, Ty<'src, 'a>>>,
+        Vec<Option<Identifier<'src>>>,
+    ) {
         let mut types = Vec::new();
         let mut names = Vec::new();
 
@@ -328,15 +354,17 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
         if !self.check(TokenTy::CloseParen) {
             types.push(self.parse_type());
-            if self.check(TokenTy::Identifier) {
-                names.push(self.parse_identifier());
-            }
+            names.push(
+                self.check(TokenTy::Identifier)
+                    .then(|| self.parse_identifier()),
+            );
 
             while self.eat_if(TokenTy::Comma) {
                 types.push(self.parse_type());
-                if self.check(TokenTy::Identifier) {
-                    names.push(self.parse_identifier());
-                }
+                names.push(
+                    self.check(TokenTy::Identifier)
+                        .then(|| self.parse_identifier()),
+                );
             }
         }
         self.eat(TokenTy::CloseParen, SyntaxError::UnclosedDelimiter);
@@ -345,20 +373,18 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
     }
 
     fn declaration(&mut self) -> Option<Stmt<'src, 'a>> {
-        if let TokenTy::Typedef = self.peek() {
-            self.typedef();
-            return None;
-        }
-
-        // Check if variable declaration
-        if self.next_is_type() {
-            let ty = self.parse_type();
-            let id = self.parse_identifier();
-
-            if self.check(TokenTy::OpenParen) {
-                Some(self.function_decl(ty, id))
-            } else {
-                Some(self._var_declaration(ty, id))
+        // Check if item like declaration
+        if self.peek().is_specifier() || self.parse_ty_specifier().is_some() {
+            match self.item() {
+                Some(Declaration::Fn(fun)) if fun.body.is_some() => {
+                    self.error_at_ctx(SyntaxError::FunctionDefInBody, fun.id.ctx.clone());
+                    Some(Stmt::Decl(Box::new_in(
+                        Declaration::Fn(fun),
+                        self.ast_arena,
+                    )))
+                }
+                Some(decl) => Some(Stmt::Decl(Box::new_in(decl, self.ast_arena))),
+                None => None,
             }
         } else {
             Some(self.stmt())
@@ -374,28 +400,22 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
     }
 
-    fn var_declaration(&mut self) -> Stmt<'src, 'a> {
-        let ty = self.parse_type();
-        let id = self.parse_identifier();
-
-        self._var_declaration(ty, id)
-    }
-
-    fn _var_declaration(
+    fn var_declaration(
         &mut self,
-        ty: Interned<'a, Ty<'src, 'a>>,
+        specifiers: Specifiers<'src, 'a>,
         id: Identifier<'src>,
-    ) -> Stmt<'src, 'a> {
+    ) -> Declaration<'src, 'a> {
         // Check for optional initializer
-        let init = if self.eat_if(TokenTy::Equal) {
-            let expr = self.expr();
-            Some(self.alloc_expr(expr))
-        } else {
-            None
-        };
+        let init = self.eat_if(TokenTy::Equal).then(|| self.expr());
 
         self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
-        Stmt::Decl(id, ty, init)
+        let decl = VarDecl {
+            specifier_flags: specifiers.flags,
+            id,
+            ty: specifiers.ty,
+            init,
+        };
+        Declaration::Var(decl)
     }
 
     fn stmt(&mut self) -> Stmt<'src, 'a> {
@@ -494,16 +514,17 @@ impl<'src, 'a, 'ty> Parser<'src, 'a, 'ty> {
 
         self.eat_no_sync(TokenTy::OpenParen, SyntaxError::ExpectedOpenParen);
 
-        let init = if self.next_is_type() {
-            let decl = self.var_declaration();
-            Some(self.alloc_stmt(decl))
-        } else if self.eat_if(TokenTy::Semicolon) {
-            None
-        } else {
-            let init_expr = self.expr();
-            let init = Stmt::Expr(self.alloc_expr(init_expr));
-            self.eat(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);
-            Some(self.alloc_stmt(init))
+        let ctx = self.curr.ctx.clone();
+        let init = match self.declaration() {
+            Some(Stmt::Decl(decl)) if matches!(*decl, Declaration::Var(_)) => {
+                Some(self.alloc_stmt(Stmt::Decl(decl)))
+            }
+            Some(stmt @ Stmt::Expr(_)) => Some(self.alloc_stmt(stmt)),
+            Some(Stmt::Nil) => None,
+            _ => {
+                self.error_at_ctx(SyntaxError::ExpectedExpr, ctx);
+                None
+            }
         };
 
         let condition = self.optional_expr(TokenTy::Semicolon, SyntaxError::ExpectedSemicolon);

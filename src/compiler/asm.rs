@@ -7,16 +7,25 @@ use std::{
 
 use crate::intern::Interned;
 
+pub enum Linkage {
+    Global,
+    None,
+}
+
 pub struct Program<'src> {
     pub(crate) functions: Vec<Function<'src>>,
     pub(crate) globals: Vec<GlobalVar<'src>>,
 }
 
 pub struct GlobalVar<'src> {
+    pub(crate) linkage: Linkage,
     pub(crate) name: Interned<'src, str>,
+    pub(crate) generation: Option<u32>,
+    pub(crate) def: Option<i32>,
 }
 
 pub struct Function<'src> {
+    pub(crate) linkage: Linkage,
     pub(crate) name: Interned<'src, str>,
     pub(crate) insts: Vec<Inst<'src>>,
 }
@@ -48,15 +57,17 @@ pub enum Inst<'src> {
 }
 
 #[derive(Clone, Copy)]
-pub struct Label(pub(crate) usize);
+pub struct Label(pub(crate) u32);
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Operand<'src> {
     Imm(i32),
     Reg(Reg),
-    Psuedo(usize),
+    Psuedo(u32),
     Stack(isize),
-    GlobalVar(Interned<'src, str>),
+    Fn(Interned<'src, str>),
+    Data(Interned<'src, str>),
+    LocalData(u32),
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -134,31 +145,66 @@ impl Program<'_> {
 
 impl Display for Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "    .text")?;
+        for fun in &self.functions {
+            writeln!(f, "{fun}")?;
+        }
+
         for global in &self.globals {
             writeln!(f, "{global}")?;
         }
 
-        for fun in &self.functions {
-            writeln!(f, "{fun}")?;
-        }
         Ok(())
     }
 }
 
 impl Display for GlobalVar<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("GlobalVar")
+        if let Some(local_gen) = self.generation {
+            if matches!(self.linkage, Linkage::Global) {
+                writeln!(f, "    .globl LS{local_gen}")?;
+            }
+
+            if let Some(def) = self.def {
+                writeln!(f, "    .data")?;
+                writeln!(f, "    .align 4")?;
+                writeln!(f, "LD{local_gen}:")?;
+                writeln!(f, "    .long {def}")
+            } else {
+                writeln!(f, "    .bss")?;
+                writeln!(f, "    .align 4")?;
+                writeln!(f, "LD{local_gen}:")?;
+                writeln!(f, "    .zero 4")
+            }
+        } else {
+            if matches!(self.linkage, Linkage::Global) {
+                writeln!(f, "    .globl {}", self.name)?;
+            }
+
+            if let Some(def) = self.def {
+                writeln!(f, "    .data")?;
+                writeln!(f, "    .align 4")?;
+                writeln!(f, "{}:", self.name)?;
+                writeln!(f, "    .long {def}")
+            } else {
+                writeln!(f, "    .bss")?;
+                writeln!(f, "    .align 4")?;
+                writeln!(f, "{}:", self.name)?;
+                writeln!(f, "    .zero 4")
+            }
+        }
     }
 }
 
 impl Display for Function<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Function { name, insts } = self;
-        writeln!(f, "    .globl {name}")?;
-        writeln!(f, "{name}:")?;
+        if matches!(self.linkage, Linkage::Global) {
+            writeln!(f, "    .globl {}", self.name)?;
+        }
+        writeln!(f, "{}:", self.name)?;
         writeln!(f, "    pushq %rbp")?;
         writeln!(f, "    movq %rsp, %rbp")?;
-        for inst in insts {
+        for inst in &self.insts {
             writeln!(f, "{inst}")?;
         }
         Ok(())
@@ -261,7 +307,9 @@ impl Display for OneByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_one_byte()),
             Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
-            Operand::GlobalVar(name) => write!(f, "{name}"),
+            Operand::Fn(name) => write!(f, "{name}"),
+            Operand::Data(name) => write!(f, "{name}(%rip)"),
+            Operand::LocalData(id) => write!(f, "LD{id}(%rip)"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -273,7 +321,9 @@ impl Display for TwoByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_two_byte()),
             Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
-            Operand::GlobalVar(name) => write!(f, "{name}"),
+            Operand::Fn(name) => write!(f, "{name}"),
+            Operand::Data(name) => write!(f, "{name}(%rip)"),
+            Operand::LocalData(id) => write!(f, "LD{id}(%rip)"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -285,7 +335,9 @@ impl Display for FourByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_four_byte()),
             Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
-            Operand::GlobalVar(name) => write!(f, "{name}"),
+            Operand::Fn(name) => write!(f, "{name}"),
+            Operand::Data(name) => write!(f, "{name}(%rip)"),
+            Operand::LocalData(id) => write!(f, "LD{id}(%rip)"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
@@ -297,7 +349,9 @@ impl Display for EightByteOperand<'_> {
             Operand::Imm(imm) => write!(f, "${imm}"),
             Operand::Reg(reg) => write!(f, "%{}", reg.as_eight_byte()),
             Operand::Stack(offset) => write!(f, "{offset}(%rbp)"),
-            Operand::GlobalVar(name) => write!(f, "{name}"),
+            Operand::Fn(name) => write!(f, "{name}"),
+            Operand::Data(name) => write!(f, "{name}(%rip)"),
+            Operand::LocalData(id) => write!(f, "LD{id}(%rip)"),
             Operand::Psuedo(_) => unreachable!(),
         }
     }
