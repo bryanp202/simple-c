@@ -137,7 +137,13 @@ impl<'src, 'a, A: Allocator> SymbolTable<'src, 'a, A> {
         }
     }
 
-    pub fn into_parts(self) -> (Vec<Function<'src, 'a, A>>, Vec<GlobalVar<'src>>) {
+    pub fn into_parts(mut self) -> (Vec<Function<'src, 'a, A>>, Vec<GlobalVar<'src>>) {
+        for (name, data) in self.symbols {
+            if data.specifier_flags.symmetric_difference(SpecifierFlags::Static).is_empty() {
+                self.globals.push(GlobalVar { linkage: Linkage::None, name, generation: None, def: None });
+            }
+        }
+
         (self.functions, self.globals)
     }
 
